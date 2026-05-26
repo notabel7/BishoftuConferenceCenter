@@ -1,0 +1,47 @@
+====================================================
+  ICON FILES REQUIRED — Bishoftu Conference Center
+====================================================
+
+Place the following PNG files in THIS folder:
+
+  add.png       — for "Add Hall / Add Event / Add Employee" buttons
+  edit.png      — for "Edit" buttons
+  delete.png    — for "Delete" buttons
+  refresh.png   — for "Refresh" buttons
+  details.png   — for "Details" button (Events panel)
+
+Recommended size: 20×20 or 24×24 pixels (the app scales them to 18×18)
+
+----------------------------------------------------
+FREE ICON SOURCES (no attribution required)
+----------------------------------------------------
+
+1. Google Material Symbols (best quality, free)
+   https://fonts.google.com/icons
+   Search each name, set "PNG" format, download at 24dp.
+   Suggested searches:
+     add         → "add" or "add_circle"
+     edit        → "edit" or "edit_square"
+     delete      → "delete" or "delete_forever"
+     refresh     → "refresh"
+     details     → "info" or "list_alt"
+
+2. Flaticon (free with account)
+   https://www.flaticon.com
+
+3. Icons8 (free PNG up to 100px)
+   https://icons8.com/icons
+
+----------------------------------------------------
+AFTER DOWNLOADING
+----------------------------------------------------
+1. Rename each file to match exactly:
+     add.png, edit.png, delete.png, refresh.png, details.png
+
+2. Run compile.bat again — it copies icons into the output folder.
+
+3. Run run.bat — icons will appear on the buttons automatically.
+
+If any icon file is missing, the button will still work
+with text-only (graceful fallback built into the code).
+====================================================

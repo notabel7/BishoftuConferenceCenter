@@ -1,0 +1,18 @@
+# ── Compiled output ───────────────────────────────────────────────────────────
+out/
+*.class
+
+# ── SQLite database (contains runtime data, must not be committed) ────────────
+*.db
+
+# ── IntelliJ IDEA ─────────────────────────────────────────────────────────────
+.idea/
+*.iml
+
+# ── OS generated files ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+*.properties
