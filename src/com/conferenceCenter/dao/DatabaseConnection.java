@@ -75,6 +75,11 @@ public class DatabaseConnection {
 
             // ── events ────────────────────────────────────────────────
             // Owner name is split into first_name + last_name (1NF atomicity).
+            // start_date / end_date stored as ISO-8601 TEXT; both are enforced
+            // by GLOB CHECK (same pattern as date_of_birth on employees/admins).
+            // Table-level CHECK ensures end_date cannot precede start_date —
+            // a constraint that spans two columns and cannot be expressed as a
+            // column-level CHECK.
             st.execute(
                 "CREATE TABLE IF NOT EXISTS events (" +
                 "  event_id          INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -82,16 +87,25 @@ public class DatabaseConnection {
                 "  type              TEXT    NOT NULL," +
                 "  owner_first_name  TEXT    NOT NULL," +
                 "  owner_last_name   TEXT    NOT NULL," +
-                "  owner_phone       TEXT    NOT NULL" +
+                "  owner_phone       TEXT    NOT NULL," +
+                "  start_date        TEXT    NOT NULL DEFAULT '2025-01-01'" +
+                "    CHECK(start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')," +
+                "  end_date          TEXT    NOT NULL DEFAULT '2025-01-01'" +
+                "    CHECK(end_date   GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')," +
+                "  CHECK(end_date >= start_date)" +
                 ")"
             );
 
             // ── event_hall (junction / associative table) ─────────────
-            // Resolves the many-to-many relationship between events and halls.
+            // seats_requested is a property of the relationship (not of the
+            // event alone or the hall alone) — correct 2NF placement.
+            // The same event could use Hall A for 200 people and Hall B for
+            // 50 people; storing seats on the junction row captures this.
             st.execute(
                 "CREATE TABLE IF NOT EXISTS event_hall (" +
-                "  event_id INTEGER NOT NULL," +
-                "  hall_id  INTEGER NOT NULL," +
+                "  event_id        INTEGER NOT NULL," +
+                "  hall_id         INTEGER NOT NULL," +
+                "  seats_requested INTEGER NOT NULL DEFAULT 1 CHECK(seats_requested > 0)," +
                 "  PRIMARY KEY (event_id, hall_id)," +
                 "  FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE," +
                 "  FOREIGN KEY (hall_id)  REFERENCES halls(hall_id)   ON DELETE CASCADE" +
@@ -153,6 +167,17 @@ public class DatabaseConnection {
                 "  password            TEXT    NOT NULL" +
                 ")"
             );
+
+            // ── Migrations (safe to re-run; duplicate-column errors ignored) ─
+            // ALTER TABLE ADD COLUMN only works if the column doesn't exist yet.
+            // SQLite throws "duplicate column name" — we catch and ignore it so
+            // the app starts cleanly whether the database is fresh or pre-existing.
+            try { st.execute("ALTER TABLE events ADD COLUMN start_date TEXT NOT NULL DEFAULT '2025-01-01'"); }
+            catch (SQLException ignored) {}
+            try { st.execute("ALTER TABLE events ADD COLUMN end_date TEXT NOT NULL DEFAULT '2025-01-01'"); }
+            catch (SQLException ignored) {}
+            try { st.execute("ALTER TABLE event_hall ADD COLUMN seats_requested INTEGER NOT NULL DEFAULT 1"); }
+            catch (SQLException ignored) {}
 
             // ── Seed: default admin account ───────────────────────────
             ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM admins");

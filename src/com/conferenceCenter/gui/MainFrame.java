@@ -66,9 +66,30 @@ public class MainFrame extends JFrame {
         tabs.setBackground(UIConstants.PRIMARY);
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 
-        addStyledTab("Halls",     new HallPanel(),     "halls.png");
-        addStyledTab("Events",    new EventPanel(),    "events.png");
-        addStyledTab("Employees", new EmployeePanel(), "employees.png");
+        // Keep references so we can wire cross-tab data-change notifications.
+        HallPanel     hallPanel     = new HallPanel();
+        EventPanel    eventPanel    = new EventPanel();
+        EmployeePanel employeePanel = new EmployeePanel();
+
+        addStyledTab("Halls",     hallPanel,     "halls.png");
+        addStyledTab("Events",    eventPanel,    "events.png");
+        addStyledTab("Employees", employeePanel, "employees.png");
+
+        // ── Cross-tab integration (Observer pattern) ──────────────────
+        // When a hall is added/edited/deleted → refresh the Event dialog's
+        // hall picker so it shows current names, prices and availability.
+        hallPanel.setOnDataChanged(eventPanel::refresh);
+
+        // When an employee is added/edited/deleted → refresh the Event dialog's
+        // staff picker so newly added staff appear immediately.
+        employeePanel.setOnDataChanged(eventPanel::refresh);
+
+        // When an event changes (staff assigned, hall booked, event deleted) →
+        // refresh both the Hall status column and the Employee assignment column.
+        eventPanel.setOnDataChanged(() -> {
+            hallPanel.refresh();
+            employeePanel.refresh();
+        });
 
         tabs.addChangeListener(e -> refreshTabStyles());
         refreshTabStyles();

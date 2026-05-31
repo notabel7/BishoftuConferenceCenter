@@ -8,7 +8,9 @@ public class Hall {
     private int    hallId;
     private String name;
     private double pricePerDay;
-    private int    capacity;       // number of seats
+    private int    capacity;        // total seats in the hall
+    private int    bookingCount;    // how many events currently use this hall (HallPanel status)
+    private int    seatsRequested;  // seats reserved by one specific event (set by getHallsForEvent)
 
     public Hall() {}
 
@@ -27,6 +29,10 @@ public class Hall {
     public void   setPricePerDay(double price)    { this.pricePerDay = price; }
     public int    getCapacity()                   { return capacity; }
     public void   setCapacity(int capacity)       { this.capacity = capacity; }
+    public int    getBookingCount()               { return bookingCount; }
+    public void   setBookingCount(int n)          { this.bookingCount = n; }
+    public int    getSeatsRequested()             { return seatsRequested; }
+    public void   setSeatsRequested(int n)        { this.seatsRequested = n; }
 
     @Override
     public String toString() {

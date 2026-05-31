@@ -16,6 +16,10 @@ public class Event {
     private String ownerFirstName;
     private String ownerLastName;
     private String ownerPhone;
+    // Stored as ISO-8601 TEXT (YYYY-MM-DD) — consistent with date_of_birth on employees.
+    // end_date >= start_date is enforced at the DB level (table-level CHECK constraint).
+    private String startDate;
+    private String endDate;
 
     private List<Hall>             halls     = new ArrayList<>();
     private List<AssignedEmployee> employees = new ArrayList<>();
@@ -23,13 +27,16 @@ public class Event {
     public Event() {}
 
     public Event(int eventId, String name, String type,
-                 String ownerFirstName, String ownerLastName, String ownerPhone) {
+                 String ownerFirstName, String ownerLastName, String ownerPhone,
+                 String startDate, String endDate) {
         this.eventId        = eventId;
         this.name           = name;
         this.type           = type;
         this.ownerFirstName = ownerFirstName;
         this.ownerLastName  = ownerLastName;
         this.ownerPhone     = ownerPhone;
+        this.startDate      = startDate;
+        this.endDate        = endDate;
     }
 
     // ── Getters & Setters ──────────────────────────────────────────────────
@@ -49,6 +56,10 @@ public class Event {
 
     public String getOwnerPhone()                       { return ownerPhone; }
     public void   setOwnerPhone(String p)               { this.ownerPhone = p; }
+    public String getStartDate()                        { return startDate; }
+    public void   setStartDate(String d)                { this.startDate = d; }
+    public String getEndDate()                          { return endDate; }
+    public void   setEndDate(String d)                  { this.endDate = d; }
     public List<Hall>             getHalls()            { return halls; }
     public void   setHalls(List<Hall> halls)            { this.halls = halls; }
     public List<AssignedEmployee> getEmployees()        { return employees; }

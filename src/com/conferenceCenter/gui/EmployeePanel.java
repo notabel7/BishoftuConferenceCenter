@@ -13,19 +13,38 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.util.List;
 
+/**
+ * Manages the staff roster — add, edit, and delete employees independently
+ * of any event. Employees are resources from a central pool; events pick
+ * from this pool rather than creating their own staff.
+ *
+ * Cross-tab integration: notifies sibling panels after any mutation so the
+ * Event dialog's staff picker always reflects the current roster.
+ */
 public class EmployeePanel extends JPanel {
 
     private final EmployeeDAO employeeDAO = new EmployeeDAO();
     private final EventDAO    eventDAO    = new EventDAO();
 
     private final String[] COLS = {
-        "ID", "First Name", "Last Name", "Phone", "Experience (yrs)", "Date of Birth", "Gender", "Assigned Event"
+        "ID", "First Name", "Last Name", "Phone", "Experience (yrs)",
+        "Date of Birth", "Gender", "Assigned Event"
     };
     private final DefaultTableModel model = new DefaultTableModel(COLS, 0) {
         @Override public boolean isCellEditable(int r, int c) { return false; }
     };
     private final JTable     table    = new JTable(model);
     private final JTextField tfSearch = new JTextField(18);
+
+    /** Notified after any data mutation so sibling panels can refresh. */
+    private DataChangeListener onDataChanged;
+
+    public void setOnDataChanged(DataChangeListener listener) {
+        this.onDataChanged = listener;
+    }
+
+    /** Called by MainFrame's cross-tab wiring to refresh this panel's table. */
+    public void refresh() { loadData(); }
 
     public EmployeePanel() {
         setLayout(new BorderLayout());
@@ -69,9 +88,9 @@ public class EmployeePanel extends JPanel {
         titleBar.add(title, BorderLayout.WEST);
         titleBar.add(searchPanel, BorderLayout.EAST);
 
-        // ── Info label ────────────────────────────────────────────────
+        // ── Info banner ───────────────────────────────────────────────
         JLabel infoLbl = new JLabel(
-            " Maximum 3 employees can be assigned per event.", JLabel.LEFT);
+            " Staff roster — assign employees to events from the Events tab.", JLabel.LEFT);
         javax.swing.ImageIcon hintIcon = UIConstants.loadIcon("hint.png");
         if (hintIcon != null) infoLbl.setIcon(hintIcon);
         infoLbl.setIconTextGap(8);
@@ -140,10 +159,10 @@ public class EmployeePanel extends JPanel {
                     ae.getEmployeeId(),
                     ae.getFirstName(),
                     ae.getLastName(),
-                    ae.getPhone(),
+                    ae.getPhone() == null ? "—" : ae.getPhone(),
                     ae.getYearsOfExperience(),
                     ae.getDateOfBirth(),
-                    ae.getGender(),
+                    ae.getGender() == null ? "—" : ae.getGender(),
                     ae.getEventName() == null ? "— Unassigned —" : ae.getEventName()
                 });
             }
@@ -167,10 +186,10 @@ public class EmployeePanel extends JPanel {
                         ae.getEmployeeId(),
                         ae.getFirstName(),
                         ae.getLastName(),
-                        ae.getPhone(),
+                        ae.getPhone() == null ? "—" : ae.getPhone(),
                         ae.getYearsOfExperience(),
                         ae.getDateOfBirth(),
-                        ae.getGender(),
+                        ae.getGender() == null ? "—" : ae.getGender(),
                         ae.getEventName() == null ? "— Unassigned —" : ae.getEventName()
                     });
                 }
@@ -183,32 +202,28 @@ public class EmployeePanel extends JPanel {
         if (row < 0) { info("Select an employee first."); return; }
         int id = (int) model.getValueAt(row, 0);
         try {
-            AssignedEmployee ae = new AssignedEmployee();
-            ae.setEmployeeId(id);
-            ae.setFirstName((String) model.getValueAt(row, 1));
-            ae.setLastName((String) model.getValueAt(row, 2));
-            ae.setPhone((String) model.getValueAt(row, 3));
-            ae.setYearsOfExperience((int) model.getValueAt(row, 4));
-            ae.setDateOfBirth((String) model.getValueAt(row, 5));
-            ae.setGender((String) model.getValueAt(row, 6));
-            showDialog(ae);
+            // Load fresh from DB so the event dropdown is pre-populated correctly
+            AssignedEmployee ae = employeeDAO.getEmployeeById(id);
+            if (ae != null) showDialog(ae);
         } catch (Exception ex) { error(ex.getMessage()); }
     }
 
     private void deleteSelected() {
         int row = table.getSelectedRow();
         if (row < 0) { info("Select an employee first."); return; }
-        int    id   = (int) model.getValueAt(row, 0);
+        int    id   = (int)    model.getValueAt(row, 0);
         String fn   = (String) model.getValueAt(row, 1);
         String ln   = (String) model.getValueAt(row, 2);
         String name = fn + " " + ln;
         int res = JOptionPane.showConfirmDialog(
-            this, "Delete employee \"" + name + "\"?",
+            this, "Delete employee \"" + name + "\"?\n" +
+            "This will also remove their event assignments.",
             "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
         if (res != JOptionPane.YES_OPTION) return;
         try {
             employeeDAO.deleteEmployee(id);
             loadData();
+            if (onDataChanged != null) onDataChanged.onDataChanged();
             JOptionPane.showMessageDialog(this, "Employee deleted.", "Deleted",
                 JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) { error(ex.getMessage()); }
@@ -229,7 +244,6 @@ public class EmployeePanel extends JPanel {
         root.setBackground(Color.WHITE);
         root.add(formHeader(isEdit ? "Edit Employee" : "New Employee"), BorderLayout.NORTH);
 
-        // Form
         JPanel form = new JPanel(new GridBagLayout());
         form.setBackground(Color.WHITE);
         form.setBorder(new EmptyBorder(16, 24, 10, 24));
@@ -247,7 +261,7 @@ public class EmployeePanel extends JPanel {
         cbGender.setFont(UIConstants.FONT_BODY);
         if (isEdit && existing.getGender() != null) cbGender.setSelectedItem(existing.getGender());
 
-        // Event combo
+        // Event assignment dropdown — populated from the live events table
         List<Event> events;
         try { events = eventDAO.getAllEvents(); }
         catch (Exception ex) { events = new java.util.ArrayList<>(); }
@@ -264,13 +278,13 @@ public class EmployeePanel extends JPanel {
         cbEvent.setSelectedIndex(selIdx);
 
         Object[][] rows = {
-            {"First Name *",     tfFirstName},
-            {"Last Name *",      tfLastName},
-            {"Phone",            tfPhone},
-            {"Experience (yrs)*",tfYoe},
-            {"Date of Birth *",  tfDob},
-            {"Gender",           cbGender},
-            {"Assigned Event",   cbEvent}
+            {"First Name *",      tfFirstName},
+            {"Last Name *",       tfLastName},
+            {"Phone",             tfPhone},
+            {"Experience (yrs)*", tfYoe},
+            {"Date of Birth *",   tfDob},
+            {"Gender",            cbGender},
+            {"Assigned Event",    cbEvent}
         };
         for (int i = 0; i < rows.length; i++) {
             gc.gridx = 0; gc.gridy = i; gc.weightx = 0.4;
@@ -282,7 +296,6 @@ public class EmployeePanel extends JPanel {
             form.add((Component) rows[i][1], gc);
         }
 
-        // Buttons
         JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
         btns.setBackground(Color.WHITE);
         JButton btnCancel = actionButton("Cancel",   new Color(200,200,200), Color.DARK_GRAY);
@@ -318,9 +331,8 @@ public class EmployeePanel extends JPanel {
                 error("Years of experience must be a whole number."); return;
             }
             if (yoe < 0) { error("Years of experience cannot be negative."); return; }
-            try {
-                java.time.LocalDate.parse(dobStr);
-            } catch (java.time.format.DateTimeParseException ex) {
+            try { java.time.LocalDate.parse(dobStr); }
+            catch (java.time.format.DateTimeParseException ex) {
                 error("Date of birth must be in YYYY-MM-DD format  (e.g. 1995-08-23)."); return;
             }
 
@@ -331,14 +343,13 @@ public class EmployeePanel extends JPanel {
                 eventId = Integer.parseInt(sel.split(" \\| ")[0].trim());
             }
 
-            // Enforce max-3 rule when adding, or when changing to a different event
+            // Enforce max-3 rule when assigning to a new event
             boolean movingToNewEvent = eventId > 0 &&
                 (!isEdit || existing.getEventId() != eventId);
             if (movingToNewEvent) {
                 try {
                     if (employeeDAO.countEmployeesForEvent(eventId) >= 3) {
-                        error("This event already has 3 employees assigned (maximum).");
-                        return;
+                        error("This event already has 3 employees assigned (maximum)."); return;
                     }
                 } catch (Exception ex) { error(ex.getMessage()); return; }
             }
@@ -358,6 +369,7 @@ public class EmployeePanel extends JPanel {
 
                 dlg.dispose();
                 loadData();
+                if (onDataChanged != null) onDataChanged.onDataChanged();
                 JOptionPane.showMessageDialog(this,
                     "Employee " + (isEdit ? "updated" : "added") + " successfully.",
                     "Success", JOptionPane.INFORMATION_MESSAGE);
@@ -404,14 +416,37 @@ public class EmployeePanel extends JPanel {
                 super.getTableCellRendererComponent(t, val, sel, foc, row, col);
                 if (!sel) setBackground(row % 2 == 0 ? Color.WHITE : UIConstants.TABLE_ALT_ROW);
                 setBorder(new EmptyBorder(0, 8, 0, 8));
+                // Highlight "Unassigned" in grey, assigned events in primary colour
+                if (col == 7) {
+                    String v = val == null ? "" : val.toString();
+                    setForeground(sel ? Color.WHITE :
+                        v.startsWith("—") ? Color.GRAY : UIConstants.PRIMARY);
+                } else {
+                    setForeground(sel ? Color.WHITE : Color.BLACK);
+                }
                 return this;
             }
         });
 
-        // ID | First Name | Last Name | Phone | Exp | DOB | Gender | Assigned Event
-        int[] widths = {40, 120, 120, 110, 90, 100, 70, 160};
+        // ID | First | Last | Phone | Exp | DOB | Gender | Assigned Event
+        int[] widths = {50, 110, 110, 100, 80, 100, 70, 170};
         for (int i = 0; i < widths.length; i++)
             table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
+
+        // Feature 6: display employee IDs as zero-padded 3-digit strings (001, 002, ...)
+        // The model still stores plain int so edit/delete lookups continue to work.
+        table.getColumnModel().getColumn(0).setCellRenderer(new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(
+                    JTable t, Object val, boolean sel, boolean foc, int row, int col) {
+                super.getTableCellRendererComponent(t, val, sel, foc, row, col);
+                if (val instanceof Integer) setText(String.format("%03d", (Integer) val));
+                if (!sel) setBackground(row % 2 == 0 ? Color.WHITE : UIConstants.TABLE_ALT_ROW);
+                setBorder(new EmptyBorder(0, 8, 0, 8));
+                setForeground(sel ? Color.WHITE : Color.BLACK);
+                return this;
+            }
+        });
     }
 
     private JPanel formHeader(String text) {
@@ -456,14 +491,8 @@ public class EmployeePanel extends JPanel {
         if (ic != null) btn.setIcon(ic);
     }
 
-    private boolean isValidPhone(String phone) {
-        return phone.matches("\\d+");
-    }
-
-    private boolean hasDigit(String s) {
-        return s.chars().anyMatch(Character::isDigit);
-    }
-
+    private boolean isValidPhone(String phone) { return phone.matches("\\d+"); }
+    private boolean hasDigit(String s) { return s.chars().anyMatch(Character::isDigit); }
     private void info(String msg)  { JOptionPane.showMessageDialog(this, msg, "Info",  JOptionPane.INFORMATION_MESSAGE); }
     private void error(String msg) { JOptionPane.showMessageDialog(this, msg, "Error", JOptionPane.ERROR_MESSAGE); }
 }

@@ -173,6 +173,139 @@ public class EmployeeDAO {
         }
     }
 
+    /**
+     * Returns a single employee by ID, including their current event assignment.
+     * Used by EmployeePanel's edit dialog to pre-populate the event dropdown correctly.
+     */
+    public AssignedEmployee getEmployeeById(int employeeId) throws SQLException {
+        String sql =
+            "SELECT e.employee_id, e.first_name, e.last_name, e.phone, " +
+            "       e.years_of_experience, e.date_of_birth, e.gender, " +
+            "       ee.event_id, ev.name AS event_name " +
+            "FROM employees e " +
+            "LEFT JOIN employee_event ee ON e.employee_id = ee.employee_id " +
+            "LEFT JOIN events ev         ON ee.event_id   = ev.event_id " +
+            "WHERE e.employee_id = ?";
+        try (PreparedStatement ps = conn().prepareStatement(sql)) {
+            ps.setInt(1, employeeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    AssignedEmployee ae = new AssignedEmployee(
+                        rs.getInt("employee_id"),
+                        rs.getString("first_name"),
+                        rs.getString("last_name"),
+                        rs.getString("phone"),
+                        rs.getInt("years_of_experience"),
+                        rs.getString("date_of_birth"),
+                        rs.getString("gender"),
+                        rs.getInt("event_id")
+                    );
+                    ae.setEventName(rs.getString("event_name"));
+                    return ae;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns all employees (one row per person) for use in the Event dialog's
+     * staff picker. Each employee carries their current event assignment name
+     * so the picker can show context ("currently assigned to: Tech Summit").
+     * Uses GROUP BY so an employee assigned to multiple events appears only once.
+     */
+    /**
+     * Returns all employees (one row per person) for the Event dialog's staff picker.
+     * Uses a subquery to find each employee's most-recent event assignment, then
+     * JOINs to events to resolve the name — avoids the correlated-subquery+aggregate
+     * pattern that SQLite rejects at runtime.
+     */
+    public List<AssignedEmployee> getAllEmployeesForPicker() throws SQLException {
+        List<AssignedEmployee> list = new ArrayList<>();
+        String sql =
+            "SELECT e.employee_id, e.first_name, e.last_name, e.phone, " +
+            "       e.years_of_experience, e.date_of_birth, e.gender, " +
+            "       COALESCE(ee2.event_id, 0) AS event_id, ev.name AS event_name " +
+            "FROM employees e " +
+            "LEFT JOIN ( " +
+            "    SELECT employee_id, MAX(event_id) AS event_id " +
+            "    FROM employee_event GROUP BY employee_id " +
+            ") ee2 ON e.employee_id = ee2.employee_id " +
+            "LEFT JOIN events ev ON ev.event_id = ee2.event_id " +
+            "ORDER BY e.last_name, e.first_name";
+        try (Statement st = conn().createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            while (rs.next()) {
+                AssignedEmployee ae = new AssignedEmployee(
+                    rs.getInt("employee_id"),
+                    rs.getString("first_name"),
+                    rs.getString("last_name"),
+                    rs.getString("phone"),
+                    rs.getInt("years_of_experience"),
+                    rs.getString("date_of_birth"),
+                    rs.getString("gender"),
+                    rs.getInt("event_id")
+                );
+                ae.setEventName(rs.getString("event_name"));
+                list.add(ae);
+            }
+        }
+        return list;
+    }
+
+    /**
+     * Returns the IDs of all employees currently assigned to a given event.
+     * Used by the Event dialog to pre-tick the correct checkboxes when editing.
+     */
+    public List<Integer> getEmployeeIdsForEvent(int eventId) throws SQLException {
+        List<Integer> ids = new ArrayList<>();
+        String sql = "SELECT employee_id FROM employee_event WHERE event_id = ?";
+        try (PreparedStatement ps = conn().prepareStatement(sql)) {
+            ps.setInt(1, eventId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) ids.add(rs.getInt("employee_id"));
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * Atomically replaces all employee assignments for an event.
+     * Old links are removed; new ones are inserted — in a single transaction.
+     * Employee records themselves are never touched.
+     *
+     * This is the correct pattern for a staff-assignment system:
+     * the Event picks from an existing staff pool; it does not own the staff.
+     */
+    public void setEventEmployees(int eventId, List<Integer> employeeIds) throws SQLException {
+        Connection c = conn();
+        c.setAutoCommit(false);
+        try {
+            try (PreparedStatement del = c.prepareStatement(
+                    "DELETE FROM employee_event WHERE event_id = ?")) {
+                del.setInt(1, eventId);
+                del.executeUpdate();
+            }
+            if (employeeIds != null && !employeeIds.isEmpty()) {
+                try (PreparedStatement ins = c.prepareStatement(
+                        "INSERT OR IGNORE INTO employee_event (employee_id, event_id) VALUES (?, ?)")) {
+                    for (int empId : employeeIds) {
+                        ins.setInt(1, empId);
+                        ins.setInt(2, eventId);
+                        ins.addBatch();
+                    }
+                    ins.executeBatch();
+                }
+            }
+            c.commit();
+        } catch (SQLException e) {
+            c.rollback();
+            throw e;
+        } finally {
+            c.setAutoCommit(true);
+        }
+    }
+
     // ── Junction-table helpers ────────────────────────────────────────────
 
     /** Inserts one row into employee_event. */

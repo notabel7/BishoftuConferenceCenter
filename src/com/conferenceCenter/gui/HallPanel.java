@@ -11,16 +11,38 @@ import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
 import java.util.List;
 
+/**
+ * Manages conference halls.
+ *
+ * Real-world improvement: the "Status" column mirrors how systems like
+ * Ungerboeck show resource availability — staff and rooms are resources,
+ * and their current utilisation is always visible at a glance.
+ *
+ * Cross-tab integration: after any add/edit/delete, notifies sibling panels
+ * via DataChangeListener so the Event dialog's hall picker stays current.
+ */
 public class HallPanel extends JPanel {
 
     private final HallDAO dao = new HallDAO();
 
-    private final String[] COLS = {"ID", "Hall Name", "Price / Day (ETB)", "Capacity (Seats)"};
+    private final String[] COLS = {
+        "ID", "Hall Name", "Price / Day (ETB)", "Capacity (Seats)", "Status"
+    };
     private final DefaultTableModel model = new DefaultTableModel(COLS, 0) {
         @Override public boolean isCellEditable(int r, int c) { return false; }
     };
-    private final JTable     table  = new JTable(model);
+    private final JTable     table    = new JTable(model);
     private final JTextField tfSearch = new JTextField(18);
+
+    /** Notified after any data mutation so sibling panels can refresh. */
+    private DataChangeListener onDataChanged;
+
+    public void setOnDataChanged(DataChangeListener listener) {
+        this.onDataChanged = listener;
+    }
+
+    /** Called by MainFrame's cross-tab wiring to refresh this panel's table. */
+    public void refresh() { loadData(); }
 
     public HallPanel() {
         setLayout(new BorderLayout(0, 0));
@@ -92,11 +114,10 @@ public class HallPanel extends JPanel {
         btnPanel.add(btnDelete);
         btnPanel.add(btnRefresh);
 
-        add(titleBar,   BorderLayout.NORTH);
+        add(titleBar,    BorderLayout.NORTH);
         add(centerPanel, BorderLayout.CENTER);
-        add(btnPanel,   BorderLayout.SOUTH);
+        add(btnPanel,    BorderLayout.SOUTH);
 
-        // ── Actions ──────────────────────────────────────────────────
         btnAdd.addActionListener(e    -> showDialog(null));
         btnEdit.addActionListener(e   -> editSelected());
         btnDelete.addActionListener(e -> deleteSelected());
@@ -117,7 +138,12 @@ public class HallPanel extends JPanel {
             for (Hall h : dao.getAllHalls()) {
                 model.addRow(new Object[]{
                     h.getHallId(), h.getName(),
-                    String.format("%.2f", h.getPricePerDay()), h.getCapacity()
+                    String.format("%.2f", h.getPricePerDay()),
+                    h.getCapacity(),
+                    h.getBookingCount() == 0
+                        ? "Available"
+                        : "In Use (" + h.getBookingCount() + " event" +
+                          (h.getBookingCount() == 1 ? "" : "s") + ")"
                 });
             }
         } catch (Exception ex) {
@@ -133,7 +159,12 @@ public class HallPanel extends JPanel {
                 if (h.getName().toLowerCase().contains(q) || q.isEmpty()) {
                     model.addRow(new Object[]{
                         h.getHallId(), h.getName(),
-                        String.format("%.2f", h.getPricePerDay()), h.getCapacity()
+                        String.format("%.2f", h.getPricePerDay()),
+                        h.getCapacity(),
+                        h.getBookingCount() == 0
+                            ? "Available"
+                            : "In Use (" + h.getBookingCount() + " event" +
+                              (h.getBookingCount() == 1 ? "" : "s") + ")"
                     });
                 }
             }
@@ -157,15 +188,26 @@ public class HallPanel extends JPanel {
     private void deleteSelected() {
         int row = table.getSelectedRow();
         if (row < 0) { info("Select a hall first."); return; }
-        int id   = (int) model.getValueAt(row, 0);
+        int    id = (int)    model.getValueAt(row, 0);
         String nm = (String) model.getValueAt(row, 1);
-        int res = JOptionPane.showConfirmDialog(
-            this, "Delete hall \"" + nm + "\"? This cannot be undone.",
-            "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-        if (res != JOptionPane.YES_OPTION) return;
+        String status = (String) model.getValueAt(row, 4);
+        if (!status.equals("Available")) {
+            int confirm = JOptionPane.showConfirmDialog(
+                this,
+                "\"" + nm + "\" is currently " + status.toLowerCase() + ".\n" +
+                "Deleting it will remove it from all associated events. Proceed?",
+                "Hall In Use", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (confirm != JOptionPane.YES_OPTION) return;
+        } else {
+            int res = JOptionPane.showConfirmDialog(
+                this, "Delete hall \"" + nm + "\"? This cannot be undone.",
+                "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (res != JOptionPane.YES_OPTION) return;
+        }
         try {
             dao.deleteHall(id);
             loadData();
+            if (onDataChanged != null) onDataChanged.onDataChanged();
             JOptionPane.showMessageDialog(this, "Hall deleted.", "Deleted",
                 JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
@@ -186,7 +228,6 @@ public class HallPanel extends JPanel {
         JPanel content = new JPanel(new BorderLayout());
         content.setBackground(Color.WHITE);
 
-        // Form
         JPanel form = new JPanel(new GridBagLayout());
         form.setBackground(Color.WHITE);
         form.setBorder(new EmptyBorder(20, 24, 10, 24));
@@ -213,7 +254,6 @@ public class HallPanel extends JPanel {
             form.add((Component) rows[i][1], gc);
         }
 
-        // Buttons
         JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
         btns.setBackground(Color.WHITE);
         JButton btnSave   = actionButton("  Save  ", UIConstants.SECONDARY, UIConstants.PRIMARY);
@@ -228,21 +268,21 @@ public class HallPanel extends JPanel {
 
         btnCancel.addActionListener(e -> dlg.dispose());
         btnSave.addActionListener(e -> {
-            String name = tfName.getText().trim();
+            String name     = tfName.getText().trim();
             String priceStr = tfPrice.getText().trim();
             String capStr   = tfCapacity.getText().trim();
             if (name.isEmpty() || priceStr.isEmpty() || capStr.isEmpty()) {
                 error("All fields are required."); return;
             }
             if (hasDigit(name)) {
-                error("Name fields cannot contain numbers."); return;
+                error("Hall name cannot contain numbers."); return;
             }
             double price; int capacity;
             try { price    = Double.parseDouble(priceStr); }
-            catch (NumberFormatException ex) { error("Price / Day must be a numeric value (e.g. 2500.00)."); return; }
+            catch (NumberFormatException ex) { error("Price / Day must be a number (e.g. 2500.00)."); return; }
             try { capacity = Integer.parseInt(capStr); }
             catch (NumberFormatException ex) { error("Capacity must be a whole number (e.g. 200)."); return; }
-            if (price <= 0 || capacity <= 0) { error("Price and capacity must be positive numbers."); return; }
+            if (price <= 0 || capacity <= 0) { error("Price and capacity must be positive."); return; }
 
             try {
                 Hall h = isEdit ? existing : new Hall();
@@ -253,6 +293,7 @@ public class HallPanel extends JPanel {
                 else        dao.addHall(h);
                 dlg.dispose();
                 loadData();
+                if (onDataChanged != null) onDataChanged.onDataChanged();
                 JOptionPane.showMessageDialog(this,
                     "Hall " + (isEdit ? "updated" : "added") + " successfully.",
                     "Success", JOptionPane.INFORMATION_MESSAGE);
@@ -266,6 +307,9 @@ public class HallPanel extends JPanel {
 
     // ── Styling helpers ───────────────────────────────────────────────────
 
+    private static final Color STATUS_AVAILABLE = new Color(27, 94, 32);
+    private static final Color STATUS_IN_USE    = new Color(230, 81, 0);
+
     private void styleTable() {
         table.setFont(UIConstants.FONT_TABLE);
         table.setRowHeight(UIConstants.ROW_HEIGHT);
@@ -276,7 +320,6 @@ public class HallPanel extends JPanel {
         table.setFillsViewportHeight(true);
         table.setBackground(Color.WHITE);
 
-        // Custom header renderer — overrides whatever the system L&F injects
         table.getTableHeader().setReorderingAllowed(false);
         table.getTableHeader().setDefaultRenderer(new DefaultTableCellRenderer() {
             @Override
@@ -293,7 +336,7 @@ public class HallPanel extends JPanel {
             }
         });
 
-        // Alternating rows — bold font for consistent, uniform appearance
+        // Default renderer for all columns except Status
         table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(
@@ -301,16 +344,36 @@ public class HallPanel extends JPanel {
                 super.getTableCellRendererComponent(t, val, sel, foc, row, col);
                 if (!sel) setBackground(row % 2 == 0 ? Color.WHITE : UIConstants.TABLE_ALT_ROW);
                 setFont(UIConstants.FONT_BOLD);
+                setForeground(sel ? Color.WHITE : Color.BLACK);
                 setBorder(new EmptyBorder(0, 8, 0, 8));
                 return this;
             }
         });
 
-        // Column widths
-        table.getColumnModel().getColumn(0).setPreferredWidth(40);
-        table.getColumnModel().getColumn(1).setPreferredWidth(220);
-        table.getColumnModel().getColumn(2).setPreferredWidth(160);
-        table.getColumnModel().getColumn(3).setPreferredWidth(130);
+        // Custom renderer for the Status column (col 4) — green / orange
+        table.getColumnModel().getColumn(4).setCellRenderer(new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(
+                    JTable t, Object val, boolean sel, boolean foc, int row, int col) {
+                super.getTableCellRendererComponent(t, val, sel, foc, row, col);
+                String text = val == null ? "" : val.toString();
+                setText(text);
+                setFont(UIConstants.FONT_BOLD);
+                setBorder(new EmptyBorder(0, 8, 0, 8));
+                if (!sel) {
+                    setBackground(row % 2 == 0 ? Color.WHITE : UIConstants.TABLE_ALT_ROW);
+                    setForeground(text.startsWith("Available") ? STATUS_AVAILABLE : STATUS_IN_USE);
+                } else {
+                    setForeground(Color.WHITE);
+                }
+                return this;
+            }
+        });
+
+        // ID | Name | Price | Capacity | Status
+        int[] widths = {40, 200, 150, 120, 140};
+        for (int i = 0; i < widths.length; i++)
+            table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
     }
 
     private JPanel formHeader(String text) {
@@ -345,7 +408,6 @@ public class HallPanel extends JPanel {
         b.setBorderPainted(false);
         b.setOpaque(true);
         b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        // Natural width so text is never clipped regardless of label length
         b.setMargin(new Insets(6, 14, 6, 14));
         b.setIconTextGap(6);
         return b;
@@ -368,6 +430,6 @@ public class HallPanel extends JPanel {
         return s.chars().anyMatch(Character::isDigit);
     }
 
-    private void info(String msg)  { JOptionPane.showMessageDialog(this, msg, "Info",    JOptionPane.INFORMATION_MESSAGE); }
-    private void error(String msg) { JOptionPane.showMessageDialog(this, msg, "Error",   JOptionPane.ERROR_MESSAGE); }
+    private void info(String msg)  { JOptionPane.showMessageDialog(this, msg, "Info",  JOptionPane.INFORMATION_MESSAGE); }
+    private void error(String msg) { JOptionPane.showMessageDialog(this, msg, "Error", JOptionPane.ERROR_MESSAGE); }
 }

@@ -20,7 +20,7 @@ public final class UIConstants {
     public static final Color SUCCESS        = new Color( 27,  94,  32);
     public static final Color BORDER_COLOR   = new Color(189, 193, 226);
     public static final Color INPUT_BG       = new Color(250, 250, 255);
-    public static final Color SELECTED_ROW   = new Color(197, 202, 233);
+    public static final Color SELECTED_ROW   = new Color(48,  63,  159); // dark blue selection
 
     // ── Fonts ─────────────────────────────────────────────────────────────
     public static final Font FONT_TITLE  = new Font("Segoe UI", Font.BOLD,  26);
