@@ -261,10 +261,8 @@ public class EventPanel extends JPanel {
         JTextField tfOwnerFirstName = formField(isEdit ? existing.getOwnerFirstName() : "");
         JTextField tfOwnerLastName  = formField(isEdit ? existing.getOwnerLastName()  : "");
         JTextField tfOwnerPhone     = formField(isEdit ? existing.getOwnerPhone()     : "");
-        JTextField tfStartDate      = formField(isEdit ? existing.getStartDate()      : "");
-        JTextField tfEndDate        = formField(isEdit ? existing.getEndDate()        : "");
-        tfStartDate.setToolTipText("Format: YYYY-MM-DD  e.g. 2025-06-15");
-        tfEndDate.setToolTipText("Format: YYYY-MM-DD  e.g. 2025-06-17");
+        JTextField tfStartDate      = hintField(isEdit ? existing.getStartDate() : "", "e.g.  2025-06-15");
+        JTextField tfEndDate        = hintField(isEdit ? existing.getEndDate()   : "", "e.g.  2025-06-17");
 
         // Feature 3: Date-overlap notification — fires when the user tabs out of End Date.
         // Informational only; does not block saving.
@@ -300,25 +298,75 @@ public class EventPanel extends JPanel {
 
         JPanel tabBasic = new JPanel(new GridBagLayout());
         tabBasic.setBackground(Color.WHITE);
-        tabBasic.setBorder(new EmptyBorder(16, 20, 16, 20));
+        tabBasic.setBorder(new EmptyBorder(10, 20, 10, 20));
         GridBagConstraints gc = new GridBagConstraints();
-        gc.fill = GridBagConstraints.HORIZONTAL; gc.insets = new Insets(7, 4, 7, 4);
+        gc.fill = GridBagConstraints.HORIZONTAL;
 
-        Object[][] basicRows = {
-            {"Event / Conference Name *", tfName},
-            {"Event Type *",              cbType},
-            {"Start Date * (YYYY-MM-DD)", tfStartDate},
-            {"End Date *   (YYYY-MM-DD)", tfEndDate},
-            {"Owner First Name *",        tfOwnerFirstName},
-            {"Owner Last Name *",         tfOwnerLastName},
-            {"Owner Phone *",             tfOwnerPhone}
+        // Helper to add a full-width section header spanning both columns
+        int bRow = 0;
+
+        // ── Section: Event Details ────────────────────────────────────
+        gc.gridx = 0; gc.gridy = bRow; gc.gridwidth = 2; gc.weightx = 1.0;
+        gc.insets = new Insets(4, 4, 4, 4);
+        tabBasic.add(sectionHeader("Event Details"), gc);
+        gc.gridwidth = 1; bRow++;
+
+        Object[][] eventRows = {
+            {"Name *", tfName},
+            {"Type *", cbType}
         };
-        for (int i = 0; i < basicRows.length; i++) {
-            gc.gridx = 0; gc.gridy = i; gc.weightx = 0.40;
-            tabBasic.add(fLabel((String) basicRows[i][0]), gc);
-            gc.gridx = 1; gc.weightx = 0.60;
-            tabBasic.add((Component) basicRows[i][1], gc);
+        for (Object[] r : eventRows) {
+            gc.insets = new Insets(3, 4, 3, 4);
+            gc.gridx = 0; gc.gridy = bRow; gc.weightx = 0.38;
+            tabBasic.add(fLabel((String) r[0]), gc);
+            gc.gridx = 1; gc.weightx = 0.62;
+            tabBasic.add((Component) r[1], gc);
+            bRow++;
         }
+
+        // ── Section: Dates ────────────────────────────────────────────
+        gc.gridx = 0; gc.gridy = bRow; gc.gridwidth = 2; gc.weightx = 1.0;
+        gc.insets = new Insets(12, 4, 4, 4);
+        tabBasic.add(sectionHeader("Event Dates"), gc);
+        gc.gridwidth = 1; bRow++;
+
+        Object[][] dateRows = {
+            {"Start Date *", tfStartDate},
+            {"End Date *",   tfEndDate}
+        };
+        for (Object[] r : dateRows) {
+            gc.insets = new Insets(3, 4, 3, 4);
+            gc.gridx = 0; gc.gridy = bRow; gc.weightx = 0.38;
+            tabBasic.add(fLabel((String) r[0]), gc);
+            gc.gridx = 1; gc.weightx = 0.62;
+            tabBasic.add((Component) r[1], gc);
+            bRow++;
+        }
+
+        // ── Section: Owner Contact ────────────────────────────────────
+        gc.gridx = 0; gc.gridy = bRow; gc.gridwidth = 2; gc.weightx = 1.0;
+        gc.insets = new Insets(12, 4, 4, 4);
+        tabBasic.add(sectionHeader("Owner Contact"), gc);
+        gc.gridwidth = 1; bRow++;
+
+        Object[][] ownerRows = {
+            {"First Name *", tfOwnerFirstName},
+            {"Last Name *",  tfOwnerLastName},
+            {"Phone *",      tfOwnerPhone}
+        };
+        for (Object[] r : ownerRows) {
+            gc.insets = new Insets(3, 4, 3, 4);
+            gc.gridx = 0; gc.gridy = bRow; gc.weightx = 0.38;
+            tabBasic.add(fLabel((String) r[0]), gc);
+            gc.gridx = 1; gc.weightx = 0.62;
+            tabBasic.add((Component) r[1], gc);
+            bRow++;
+        }
+
+        // Push everything to the top
+        gc.gridx = 0; gc.gridy = bRow; gc.gridwidth = 2;
+        gc.weighty = 1.0; gc.fill = GridBagConstraints.BOTH;
+        tabBasic.add(new JPanel() {{ setOpaque(false); }}, gc);
 
         // ══════════════════════════════════════════════════════════════
         // TAB 2 — Hall Booking  (date-aware, rebuilt each time the tab is shown)
@@ -388,75 +436,104 @@ public class EventPanel extends JPanel {
                         int seatsLeft = h.getCapacity() - seatsUsed;
                         boolean isFull = hasDates && seatsLeft <= 0;
 
-                        // ── Availability status (inline, colour-coded) ─────
-                        // No Unicode symbols — plain ASCII text + color only.
-                        String statusMark;
+                        // ── Availability status text — clean, no bracket tags ──
+                        String statusText;
                         Color  statusColor;
                         if (!hasDates) {
-                            statusMark  = "   -- enter dates in Basic Info first";
-                            statusColor = Color.GRAY;
+                            statusText  = "Enter dates in Basic Info first";
+                            statusColor = new Color(150, 150, 150);
                         } else if (isFull) {
-                            // Feature 4: "Already Taken" label — prominent red text
-                            statusMark  = "   [ALREADY TAKEN]  All " + h.getCapacity() + " seats booked";
+                            statusText  = "ALREADY TAKEN  (all " + h.getCapacity() + " seats booked)";
                             statusColor = UIConstants.DANGER;
                         } else if (seatsUsed > 0) {
-                            statusMark  = "   [!]  " + seatsLeft + " of " + h.getCapacity() + " seats still free";
+                            statusText  = seatsLeft + " of " + h.getCapacity() + " seats free";
                             statusColor = new Color(230, 81, 0);
                         } else {
-                            statusMark  = "   [OK]  All " + h.getCapacity() + " seats available";
+                            statusText  = "All " + h.getCapacity() + " seats available";
                             statusColor = new Color(27, 94, 32);
                         }
 
-                        // Single flat row — no nested vertical panels
-                        JPanel hallRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 3));
+                        // ── Row: tight single line, thin bottom divider ────
+                        JPanel hallRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 6));
                         hallRow.setBackground(Color.WHITE);
                         hallRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+                        hallRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
+                        hallRow.setBorder(BorderFactory.createMatteBorder(
+                            0, 0, 1, 0, new Color(220, 220, 235)));
 
-                        String cbText = h.getName() +
-                            "   |   ETB " + String.format("%.2f", h.getPricePerDay()) + "/day" +
-                            statusMark;
-                        JCheckBox cb = new JCheckBox(cbText);
-                        cb.setFont(UIConstants.FONT_BODY);
-                        cb.setForeground(statusColor);
+                        // Hall name — bold, black (or grey if taken)
+                        JCheckBox cb = new JCheckBox(h.getName());
+                        cb.setFont(UIConstants.FONT_BOLD);
+                        cb.setForeground(isFull ? new Color(160, 160, 160) : Color.BLACK);
                         cb.setBackground(Color.WHITE);
                         cb.putClientProperty("hallId", h.getHallId());
                         cb.setEnabled(!isFull);
 
-                        JLabel seatsLbl = new JLabel("  Seats:");
+                        // Price — small, muted grey
+                        JLabel priceLbl = new JLabel(
+                            "ETB " + String.format("%.0f", h.getPricePerDay()) + "/day");
+                        priceLbl.setFont(UIConstants.FONT_SMALL);
+                        priceLbl.setForeground(new Color(110, 110, 110));
+
+                        // Divider pip
+                        JLabel pipLbl = new JLabel("|");
+                        pipLbl.setFont(UIConstants.FONT_SMALL);
+                        pipLbl.setForeground(new Color(190, 190, 200));
+
+                        // Status — small, color-coded, no brackets
+                        JLabel statusLbl = new JLabel(statusText);
+                        statusLbl.setFont(isFull
+                            ? new Font(UIConstants.FONT_SMALL.getName(), Font.BOLD,
+                                       UIConstants.FONT_SMALL.getSize())
+                            : UIConstants.FONT_SMALL);
+                        statusLbl.setForeground(statusColor);
+
+                        // Seats label — shown only when checkbox is ticked
+                        String seatsLblText = hasDates
+                            ? "   Seats (max " + seatsLeft + "):"
+                            : "   Seats:";
+                        JLabel seatsLbl = new JLabel(seatsLblText);
                         seatsLbl.setFont(UIConstants.FONT_SMALL);
                         seatsLbl.setForeground(UIConstants.PRIMARY);
                         seatsLbl.setVisible(false);
 
-                        // Spinner max = hall capacity (hard ceiling).
-                        // A separate warning fires when typed value > available seats.
+                        // Spinner max = seatsLeft (remaining available seats), NOT full capacity.
+                        // This means arrow-clicking is also hard-capped at what's actually free.
+                        // Final copies needed for capture inside the FocusAdapter lambda.
+                        final int seatsUsedFinal = seatsUsed;
+                        int spinnerMax = Math.max(1, seatsLeft); // always at least 1 to avoid model error
                         int initVal = 1;
                         if (existingHallSeats.containsKey(h.getHallId()))
-                            initVal = Math.min(existingHallSeats.get(h.getHallId()), h.getCapacity());
+                            initVal = Math.min(existingHallSeats.get(h.getHallId()), spinnerMax);
                         JSpinner spinner = new JSpinner(
-                            new SpinnerNumberModel(initVal, 1, h.getCapacity(), 1));
+                            new SpinnerNumberModel(initVal, 1, spinnerMax, 1));
                         spinner.setFont(UIConstants.FONT_BODY);
                         spinner.setPreferredSize(new Dimension(80, 26));
                         spinner.setVisible(false);
 
-                        // Warning when user types a number that exceeds available seats
+                        // Warning when user types a number that exceeds available seats.
+                        // IMPORTANT: read raw text BEFORE commitEdit() — commitEdit silently
+                        // clamps the value to the model max, so checking after it always passes.
                         JFormattedTextField spinnerTf =
                             ((JSpinner.DefaultEditor) spinner.getEditor()).getTextField();
                         spinnerTf.addFocusListener(new java.awt.event.FocusAdapter() {
                             @Override public void focusLost(java.awt.event.FocusEvent fe) {
                                 try {
-                                    spinner.commitEdit();
-                                    int val = (int) spinner.getValue();
-                                    if (hasDates && seatsLeft > 0 && val > seatsLeft) {
+                                    int typedVal = Integer.parseInt(spinnerTf.getText().trim());
+                                    if (typedVal > spinnerMax) {
                                         JOptionPane.showMessageDialog(dlg,
-                                            "\"" + h.getName() + "\" only has " + seatsLeft +
-                                            " seats available on your chosen dates\n" +
-                                            "(out of " + h.getCapacity() + " total).\n" +
-                                            "The value has been corrected to " + seatsLeft + ".",
+                                            "Not enough seats available in \"" + h.getName() + "\".\n\n" +
+                                            "  Total capacity : " + h.getCapacity() + " seats\n" +
+                                            "  Already booked : " + seatsUsedFinal + " seats\n" +
+                                            "  Remaining      : " + seatsLeft + " seats\n\n" +
+                                            "You entered " + typedVal + ". Maximum you can book is " + spinnerMax + ".",
                                             "Not Enough Seats Available",
                                             JOptionPane.WARNING_MESSAGE);
-                                        spinner.setValue(seatsLeft);
+                                        spinner.setValue(spinnerMax);
+                                        return;
                                     }
-                                } catch (Exception ignored) {}
+                                } catch (NumberFormatException ignored) {}
+                                try { spinner.commitEdit(); } catch (Exception ignored) {}
                             }
                         });
 
@@ -476,6 +553,9 @@ public class EventPanel extends JPanel {
                         });
 
                         hallRow.add(cb);
+                        hallRow.add(priceLbl);
+                        hallRow.add(pipLbl);
+                        hallRow.add(statusLbl);
                         hallRow.add(seatsLbl);
                         hallRow.add(spinner);
 
@@ -527,39 +607,73 @@ public class EventPanel extends JPanel {
             for (AssignedEmployee ae : allStaff) {
                 boolean preSelected = preSelectedEmpIds.contains(ae.getEmployeeId());
 
-                // Status mark inline — no separate hint line below.
-                // No Unicode symbols — plain ASCII text + color only.
-                String statusMark;
+                // ── Status text — clean, no brackets ──────────────────
+                String statusText;
                 Color  statusColor;
                 if (preSelected) {
-                    statusMark  = "   [this event]";
+                    statusText  = "Assigned to this event";
                     statusColor = UIConstants.PRIMARY;
                 } else if (ae.getEventName() != null) {
-                    statusMark  = "   [busy: " + ae.getEventName() + "]";
-                    statusColor = new Color(120, 120, 120);
+                    statusText  = "Busy: " + ae.getEventName();
+                    statusColor = new Color(150, 150, 150);
                 } else {
-                    statusMark  = "   [available]";
+                    statusText  = "Available";
                     statusColor = new Color(27, 94, 32);
                 }
 
-                String cbLabel = ae.getFirstName() + " " + ae.getLastName() +
-                    "   |   " + ae.getYearsOfExperience() + " yr" +
-                    (ae.getYearsOfExperience() == 1 ? "" : "s") + " exp" +
-                    (ae.getPhone() != null ? "   |   " + ae.getPhone() : "") +
-                    statusMark;
+                // ── Row: tight single line, thin bottom divider ────────
+                JPanel empRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 6));
+                empRow.setBackground(Color.WHITE);
+                empRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+                empRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
+                empRow.setBorder(BorderFactory.createMatteBorder(
+                    0, 0, 1, 0, new Color(220, 220, 235)));
 
-                JCheckBox cb = new JCheckBox(cbLabel);
-                cb.setFont(UIConstants.FONT_BODY);
-                cb.setForeground(statusColor);
+                // Name — bold, black (primary identifier)
+                JCheckBox cb = new JCheckBox(
+                    ae.getFirstName() + " " + ae.getLastName());
+                cb.setFont(UIConstants.FONT_BOLD);
+                cb.setForeground(Color.BLACK);
                 cb.setBackground(Color.WHITE);
-                cb.setAlignmentX(Component.LEFT_ALIGNMENT);
                 cb.putClientProperty("employeeId", ae.getEmployeeId());
                 cb.setSelected(preSelected);
+
+                // Experience — small, muted
+                JLabel expLbl = new JLabel(
+                    ae.getYearsOfExperience() + " yr" +
+                    (ae.getYearsOfExperience() == 1 ? "" : "s") + " exp");
+                expLbl.setFont(UIConstants.FONT_SMALL);
+                expLbl.setForeground(new Color(110, 110, 110));
+
+                // Pip separator
+                JLabel pip1 = new JLabel("|");
+                pip1.setFont(UIConstants.FONT_SMALL);
+                pip1.setForeground(new Color(190, 190, 200));
+
+                // Phone — small, muted (only if present)
+                JLabel phoneLbl = new JLabel(
+                    ae.getPhone() != null ? ae.getPhone() : "");
+                phoneLbl.setFont(UIConstants.FONT_SMALL);
+                phoneLbl.setForeground(new Color(110, 110, 110));
+                phoneLbl.setVisible(ae.getPhone() != null);
+
+                JLabel pip2 = new JLabel("|");
+                pip2.setFont(UIConstants.FONT_SMALL);
+                pip2.setForeground(new Color(190, 190, 200));
+                pip2.setVisible(ae.getPhone() != null);
+
+                // Status — small, color-coded, no brackets
+                JLabel statusLbl = new JLabel(statusText);
+                statusLbl.setFont(preSelected
+                    ? new java.awt.Font(UIConstants.FONT_SMALL.getName(),
+                                        java.awt.Font.BOLD,
+                                        UIConstants.FONT_SMALL.getSize())
+                    : UIConstants.FONT_SMALL);
+                statusLbl.setForeground(statusColor);
 
                 // Feature 1: one-event-per-employee confirmation + max-3 guard
                 cb.addItemListener(ie -> {
                     if (cb.isSelected()) {
-                        // Warn if this employee is currently assigned to a different event
                         if (!preSelected && ae.getEventName() != null) {
                             int res = JOptionPane.showConfirmDialog(dlg,
                                 ae.getFirstName() + " " + ae.getLastName() +
@@ -574,7 +688,6 @@ public class EventPanel extends JPanel {
                                 return;
                             }
                         }
-                        // Max-3 guard
                         long checked = empChecks.stream().filter(JCheckBox::isSelected).count();
                         if (checked > 3) {
                             cb.setSelected(false);
@@ -585,8 +698,15 @@ public class EventPanel extends JPanel {
                     }
                 });
 
+                empRow.add(cb);
+                empRow.add(expLbl);
+                empRow.add(pip1);
+                empRow.add(phoneLbl);
+                empRow.add(pip2);
+                empRow.add(statusLbl);
+
                 empChecks.add(cb);
-                staffPickerPanel.add(cb);
+                staffPickerPanel.add(empRow);
             }
         }
 
@@ -678,6 +798,30 @@ public class EventPanel extends JPanel {
             if (selectedHallSeats.isEmpty()) {
                 error("Select at least one hall for this event.");
                 tabs.setSelectedIndex(1); return;
+            }
+
+            // Hard seat-availability check at save time — catches any case where
+            // the spinner warning was bypassed (e.g. picker built before dates were entered).
+            int excludeIdFinal = isEdit ? existing.getEventId() : 0;
+            for (java.util.Map.Entry<Integer,Integer> entry : selectedHallSeats.entrySet()) {
+                try {
+                    int    hid       = entry.getKey();
+                    int    requested = entry.getValue();
+                    int    booked    = hallDAO.getSeatsBookedForHall(hid, startDate, endDate, excludeIdFinal);
+                    Hall   hall      = hallDAO.getHallById(hid);
+                    int    available = hall.getCapacity() - booked;
+                    if (requested > available) {
+                        error("Not enough seats in \"" + hall.getName() + "\".\n\n" +
+                              "  Total capacity : " + hall.getCapacity() + " seats\n" +
+                              "  Already booked : " + booked + " seats\n" +
+                              "  Remaining      : " + available + " seats\n\n" +
+                              "You requested " + requested + ". Please reduce the seat count.");
+                        tabs.setSelectedIndex(1);
+                        return;
+                    }
+                } catch (java.sql.SQLException ex) {
+                    error("Seat validation failed: " + ex.getMessage()); return;
+                }
             }
 
             // ── Collect selected staff ────────────────────────────────
@@ -799,15 +943,46 @@ public class EventPanel extends JPanel {
             gc.gridx = 0; gc.gridy = y++; gc.gridwidth = 2;
             content.add(detailEmpty("No halls booked."), gc);
         } else {
+            // Calculate event duration for cost estimate
+            long days = 1;
+            try {
+                java.time.LocalDate sd = java.time.LocalDate.parse(ev.getStartDate());
+                java.time.LocalDate ed = java.time.LocalDate.parse(ev.getEndDate());
+                days = java.time.temporal.ChronoUnit.DAYS.between(sd, ed) + 1;
+            } catch (Exception ignored) {}
+
+            double totalCost = 0;
             for (Hall h : ev.getHalls()) {
-                // Each hall is ONE line: name | seats reserved | total capacity | price
+                totalCost += h.getPricePerDay() * days;
                 String line = h.getName()
                     + "     " + h.getSeatsRequested() + " seats reserved"
                     + "  (of " + h.getCapacity() + " total)"
-                    + "     ETB " + String.format("%.2f", h.getPricePerDay()) + " / day";
+                    + "     ETB " + String.format("%,.2f", h.getPricePerDay()) + " / day";
                 gc.gridx = 0; gc.gridy = y++; gc.gridwidth = 2; gc.weightx = 1.0;
-                content.add(detailEntry(">", line, UIConstants.PRIMARY), gc);
+                content.add(detailEntry("—", line, UIConstants.PRIMARY), gc);
             }
+
+            // Estimated total cost — highlighted row
+            final long durationDays = days;
+            final double finalCost  = totalCost;
+            gc.gridx = 0; gc.gridy = y++; gc.gridwidth = 2;
+            gc.insets = new Insets(8, 8, 4, 8);
+            JPanel costPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 4));
+            costPanel.setBackground(new Color(232, 240, 254));
+            costPanel.setBorder(BorderFactory.createMatteBorder(
+                1, 3, 1, 0, UIConstants.PRIMARY));
+            JLabel costKey = new JLabel("Estimated Total:");
+            costKey.setFont(UIConstants.FONT_BOLD);
+            costKey.setForeground(new Color(80, 80, 90));
+            JLabel costVal = new JLabel(
+                "ETB " + String.format("%,.2f", finalCost) +
+                "   (" + durationDays + " day" + (durationDays == 1 ? "" : "s") + ")");
+            costVal.setFont(new java.awt.Font(
+                UIConstants.FONT_BOLD.getName(), java.awt.Font.BOLD, 14));
+            costVal.setForeground(UIConstants.PRIMARY);
+            costPanel.add(costKey);
+            costPanel.add(costVal);
+            content.add(costPanel, gc);
         }
 
         // ── Gap ───────────────────────────────────────────────────────
@@ -826,15 +1001,13 @@ public class EventPanel extends JPanel {
             content.add(detailEmpty("No staff assigned."), gc);
         } else {
             for (AssignedEmployee ae : ev.getEmployees()) {
-                // Each staff member is ONE line — all fields including gender
+                // Event context: name, experience, phone — DOB/gender are HR data, not relevant here
                 String line = ae.getFullName()
                     + "     " + ae.getYearsOfExperience() + " yr"
                     + (ae.getYearsOfExperience() == 1 ? "" : "s") + " exp"
-                    + "     DOB: " + ae.getDateOfBirth()
-                    + (ae.getGender() != null ? "     " + ae.getGender() : "")
-                    + (ae.getPhone() != null  ? "     Phone: " + ae.getPhone() : "");
+                    + (ae.getPhone() != null ? "     Phone: " + ae.getPhone() : "");
                 gc.gridx = 0; gc.gridy = y++; gc.gridwidth = 2; gc.weightx = 1.0;
-                content.add(detailEntry(">", line, Color.BLACK), gc);
+                content.add(detailEntry("—", line, Color.BLACK), gc);
             }
         }
 
@@ -848,9 +1021,9 @@ public class EventPanel extends JPanel {
         scroll.getViewport().setBackground(Color.WHITE);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
 
-        JPanel btns = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 16, 8));
         btns.setBackground(Color.WHITE);
-        btns.setBorder(new EmptyBorder(0, 0, 10, 0));
+        btns.setBorder(new EmptyBorder(0, 0, 4, 8));
         JButton close = actionButton("  Close  ", UIConstants.PRIMARY, Color.WHITE);
         close.addActionListener(e -> dlg.dispose());
         btns.add(close);
@@ -996,6 +1169,55 @@ public class EventPanel extends JPanel {
         ));
         f.setPreferredSize(new Dimension(0, UIConstants.FIELD_H));
         return f;
+    }
+
+    /** Text field that shows grey italic placeholder text when empty and unfocused. */
+    private JTextField hintField(String val, String hint) {
+        JTextField f = new JTextField(val) {
+            @Override protected void paintComponent(java.awt.Graphics g) {
+                super.paintComponent(g);
+                if (getText().isEmpty() && !isFocusOwner()) {
+                    java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING,
+                                        java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                    g2.setColor(new Color(180, 180, 190));
+                    g2.setFont(getFont().deriveFont(java.awt.Font.ITALIC));
+                    java.awt.Insets ins = getInsets();
+                    java.awt.FontMetrics fm = g2.getFontMetrics();
+                    g2.drawString(hint, ins.left + 2,
+                        ins.top + (getHeight() - ins.top - ins.bottom + fm.getAscent() - fm.getDescent()) / 2);
+                    g2.dispose();
+                }
+            }
+        };
+        f.setFont(UIConstants.FONT_BODY);
+        f.setBackground(UIConstants.INPUT_BG);
+        f.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(UIConstants.BORDER_COLOR),
+            BorderFactory.createEmptyBorder(4, 8, 4, 8)
+        ));
+        f.setPreferredSize(new Dimension(0, UIConstants.FIELD_H));
+        // Repaint on focus change so placeholder appears/disappears cleanly
+        f.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override public void focusGained(java.awt.event.FocusEvent e) { f.repaint(); }
+            @Override public void focusLost(java.awt.event.FocusEvent e)   { f.repaint(); }
+        });
+        return f;
+    }
+
+    /** Bold section header with a thin horizontal rule — used in the Basic Info form. */
+    private JPanel sectionHeader(String title) {
+        JPanel p = new JPanel(new BorderLayout(8, 0));
+        p.setBackground(Color.WHITE);
+        JLabel lbl = new JLabel(title);
+        lbl.setFont(new java.awt.Font(UIConstants.FONT_BOLD.getName(),
+                                      java.awt.Font.BOLD, 11));
+        lbl.setForeground(UIConstants.PRIMARY);
+        JSeparator sep = new JSeparator(JSeparator.HORIZONTAL);
+        sep.setForeground(new Color(200, 205, 230));
+        p.add(lbl, BorderLayout.WEST);
+        p.add(sep, BorderLayout.CENTER);
+        return p;
     }
 
     private JLabel fLabel(String text) {
