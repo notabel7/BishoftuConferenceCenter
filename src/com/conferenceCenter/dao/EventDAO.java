@@ -146,7 +146,9 @@ public class EventDAO {
     }
 
     public boolean deleteEvent(int eventId) throws SQLException {
-        // event_hall rows removed automatically by ON DELETE CASCADE
+        // event_hall rows are removed automatically by ON DELETE CASCADE.
+        // Assigned employees are released automatically by ON DELETE SET NULL on
+        // employees.event_id — their event_id becomes NULL (they are NOT deleted).
         String sql = "DELETE FROM events WHERE event_id=?";
         try (PreparedStatement ps = conn().prepareStatement(sql)) {
             ps.setInt(1, eventId);

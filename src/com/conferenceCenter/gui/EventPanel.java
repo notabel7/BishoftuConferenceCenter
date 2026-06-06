@@ -595,6 +595,13 @@ public class EventPanel extends JPanel {
         staffPickerPanel.setLayout(new BoxLayout(staffPickerPanel, BoxLayout.Y_AXIS));
         List<JCheckBox> empChecks = new ArrayList<>();
 
+        // Effectively-final copy for use in the save lambda
+        final List<Integer> preSelectedFinal = preSelectedEmpIds;
+        // Lookup maps (built below) for the save-time "move" confirmation.
+        // empId → full name, and empId → the event they're CURRENTLY assigned to.
+        final java.util.Map<Integer,String> staffName        = new java.util.HashMap<>();
+        final java.util.Map<Integer,String> staffCurrentEvent = new java.util.HashMap<>();
+
         if (allStaff.isEmpty()) {
             JLabel noEmp = new JLabel(
                 "<html>No employees found in the roster.<br>" +
@@ -606,6 +613,11 @@ public class EventPanel extends JPanel {
         } else {
             for (AssignedEmployee ae : allStaff) {
                 boolean preSelected = preSelectedEmpIds.contains(ae.getEmployeeId());
+
+                // Record name + current assignment for the save-time move check
+                staffName.put(ae.getEmployeeId(), ae.getFirstName() + " " + ae.getLastName());
+                if (ae.getEventName() != null)
+                    staffCurrentEvent.put(ae.getEmployeeId(), ae.getEventName());
 
                 // ── Status text — clean, no brackets ──────────────────
                 String statusText;
@@ -671,32 +683,12 @@ public class EventPanel extends JPanel {
                     : UIConstants.FONT_SMALL);
                 statusLbl.setForeground(statusColor);
 
-                // Feature 1: one-event-per-employee confirmation + max-3 guard
-                cb.addItemListener(ie -> {
-                    if (cb.isSelected()) {
-                        if (!preSelected && ae.getEventName() != null) {
-                            int res = JOptionPane.showConfirmDialog(dlg,
-                                ae.getFirstName() + " " + ae.getLastName() +
-                                " is currently assigned to \"" + ae.getEventName() + "\".\n" +
-                                "Saving will move them here and remove them from that event.\n\n" +
-                                "Continue?",
-                                "Employee Already Assigned",
-                                JOptionPane.YES_NO_OPTION,
-                                JOptionPane.WARNING_MESSAGE);
-                            if (res != JOptionPane.YES_OPTION) {
-                                cb.setSelected(false);
-                                return;
-                            }
-                        }
-                        long checked = empChecks.stream().filter(JCheckBox::isSelected).count();
-                        if (checked > 3) {
-                            cb.setSelected(false);
-                            JOptionPane.showMessageDialog(dlg,
-                                "Maximum 3 staff members can be assigned per event.",
-                                "Limit Reached", JOptionPane.WARNING_MESSAGE);
-                        }
-                    }
-                });
+                // NOTE: No modal dialogs are shown from here. Confirming an
+                // employee's reassignment (Feature 1) and the max-3 limit are both
+                // validated at SAVE time. Showing a modal JOptionPane from inside
+                // an ItemListener causes the checkbox's pending click to reprocess
+                // when the dialog closes, silently un-ticking the box — which made
+                // "confirm the move, then nothing moves" happen.
 
                 empRow.add(cb);
                 empRow.add(expLbl);
@@ -832,6 +824,30 @@ public class EventPanel extends JPanel {
             if (selectedEmpIds.size() > 3) {
                 error("Maximum 3 staff members can be assigned per event.");
                 tabs.setSelectedIndex(2); return;
+            }
+
+            // Feature 1: confirm reassignment of any staff currently on another event.
+            // Done here (not in the checkbox listener) so the selection is reliable.
+            List<String> movers = new ArrayList<>();
+            for (int id : selectedEmpIds) {
+                if (!preSelectedFinal.contains(id) && staffCurrentEvent.containsKey(id)) {
+                    movers.add("   - " + staffName.get(id) +
+                               "  (currently on \"" + staffCurrentEvent.get(id) + "\")");
+                }
+            }
+            if (!movers.isEmpty()) {
+                int proceed = JOptionPane.showConfirmDialog(this,
+                    "The following staff will be moved to this event and removed\n" +
+                    "from the event they are currently assigned to:\n\n" +
+                    String.join("\n", movers) + "\n\n" +
+                    "Continue?",
+                    "Reassign Staff",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+                if (proceed != JOptionPane.YES_OPTION) {
+                    tabs.setSelectedIndex(2);
+                    return;
+                }
             }
 
             // Feature 2: soft warning when no staff are assigned

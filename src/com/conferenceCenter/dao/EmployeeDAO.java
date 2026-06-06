@@ -6,14 +6,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Data-access object for the employees table and the employee_event junction table.
+ * Data-access object for the employees table.
  *
- * The employee_event junction table (added in schema v2) replaces the old
- * single event_id column on employees. This means:
- *   - An employee can be assigned to more than one event if business rules change.
- *   - The max-3-employees-per-event rule is still enforced by countEmployeesForEvent().
- *   - Deleting an employee automatically removes all their assignments (CASCADE).
- *   - Deleting an event automatically removes all assignments for that event (CASCADE).
+ * Event assignments are stored directly on employees.event_id (a nullable
+ * foreign key to events). This models the relationship as one-to-many:
+ *   - One event has many employees (up to 3, enforced in the application layer).
+ *   - Each employee belongs to at most one event — a single column physically
+ *     cannot hold two events, so "one event per employee" is guaranteed by the
+ *     schema, not just by code.
+ *   - Deleting an event releases its staff via ON DELETE SET NULL (their
+ *     event_id becomes NULL); the employees themselves are never deleted.
  */
 public class EmployeeDAO {
 
@@ -26,17 +28,16 @@ public class EmployeeDAO {
     /**
      * Returns every employee together with their current event assignment (if any).
      * Employees not assigned to any event are included with a null event name.
-     * When an employee is assigned to multiple events, one row appears per assignment.
+     * Exactly one row per employee — guaranteed by the single event_id column.
      */
     public List<AssignedEmployee> getAllEmployees() throws SQLException {
         List<AssignedEmployee> list = new ArrayList<>();
         String sql =
             "SELECT e.employee_id, e.first_name, e.last_name, e.phone, " +
             "       e.years_of_experience, e.date_of_birth, e.gender, " +
-            "       ee.event_id, ev.name AS event_name " +
+            "       e.event_id, ev.name AS event_name " +
             "FROM employees e " +
-            "LEFT JOIN employee_event ee ON e.employee_id = ee.employee_id " +
-            "LEFT JOIN events ev         ON ee.event_id   = ev.event_id " +
+            "LEFT JOIN events ev ON e.event_id = ev.event_id " +
             "ORDER BY e.last_name, e.first_name";
         try (Statement st = conn().createStatement();
              ResultSet rs = st.executeQuery(sql)) {
@@ -49,7 +50,7 @@ public class EmployeeDAO {
                     rs.getInt("years_of_experience"),
                     rs.getString("date_of_birth"),
                     rs.getString("gender"),
-                    rs.getInt("event_id")          // 0 when LEFT JOIN finds no match
+                    rs.getInt("event_id")          // 0 when event_id is NULL
                 );
                 emp.setEventName(rs.getString("event_name"));
                 list.add(emp);
@@ -62,12 +63,10 @@ public class EmployeeDAO {
     public List<AssignedEmployee> getEmployeesByEvent(int eventId) throws SQLException {
         List<AssignedEmployee> list = new ArrayList<>();
         String sql =
-            "SELECT e.employee_id, e.first_name, e.last_name, e.phone, " +
-            "       e.years_of_experience, e.date_of_birth, e.gender, ee.event_id " +
-            "FROM employees e " +
-            "JOIN employee_event ee ON e.employee_id = ee.employee_id " +
-            "WHERE ee.event_id = ? " +
-            "ORDER BY e.last_name, e.first_name";
+            "SELECT employee_id, first_name, last_name, phone, " +
+            "       years_of_experience, date_of_birth, gender, event_id " +
+            "FROM employees WHERE event_id = ? " +
+            "ORDER BY last_name, first_name";
         try (PreparedStatement ps = conn().prepareStatement(sql)) {
             ps.setInt(1, eventId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -88,9 +87,9 @@ public class EmployeeDAO {
         return list;
     }
 
-    /** Enforces the max-3-employees-per-event rule. */
+    /** Enforces the max-3-employees-per-event rule (counted in the application layer). */
     public int countEmployeesForEvent(int eventId) throws SQLException {
-        String sql = "SELECT COUNT(*) FROM employee_event WHERE event_id = ?";
+        String sql = "SELECT COUNT(*) FROM employees WHERE event_id = ?";
         try (PreparedStatement ps = conn().prepareStatement(sql)) {
             ps.setInt(1, eventId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -101,70 +100,47 @@ public class EmployeeDAO {
 
     // ── Mutations ─────────────────────────────────────────────────────────
 
-    /**
-     * Inserts a new employee and, if the employee has an event assignment,
-     * creates the matching row in employee_event.
-     */
+    /** Inserts a new employee, writing their event assignment directly into event_id. */
     public boolean addEmployee(AssignedEmployee emp) throws SQLException {
-        // 1. Insert the employee record (no event_id column any more).
-        String insertEmp =
+        String sql =
             "INSERT INTO employees " +
-            "  (first_name, last_name, phone, years_of_experience, date_of_birth, gender) " +
-            "VALUES (?, ?, ?, ?, ?, ?)";
-        try (PreparedStatement ps = conn().prepareStatement(
-                insertEmp, Statement.RETURN_GENERATED_KEYS)) {
+            "  (first_name, last_name, phone, years_of_experience, date_of_birth, gender, event_id) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement ps = conn().prepareStatement(sql)) {
             ps.setString(1, emp.getFirstName());
             ps.setString(2, emp.getLastName());
             ps.setString(3, emp.getPhone());
             ps.setInt(4,    emp.getYearsOfExperience());
             ps.setString(5, emp.getDateOfBirth());
             ps.setString(6, emp.getGender());
-            if (ps.executeUpdate() == 0) return false;
-
-            // 2. If an event is specified, link them in the junction table.
-            if (emp.getEventId() > 0) {
-                try (ResultSet keys = ps.getGeneratedKeys()) {
-                    if (keys.next()) {
-                        int newId = keys.getInt(1);
-                        linkToEvent(newId, emp.getEventId());
-                    }
-                }
-            }
+            if (emp.getEventId() > 0) ps.setInt(7, emp.getEventId());
+            else                      ps.setNull(7, java.sql.Types.INTEGER);
+            return ps.executeUpdate() > 0;
         }
-        return true;
     }
 
-    /**
-     * Updates an employee's personal details and re-links their event assignment.
-     * The old assignment is removed first; the new one is inserted if present.
-     */
+    /** Updates an employee's details and event assignment in a single statement. */
     public boolean updateEmployee(AssignedEmployee emp) throws SQLException {
-        // 1. Update personal details.
-        String updateEmp =
+        String sql =
             "UPDATE employees " +
             "SET first_name=?, last_name=?, phone=?, years_of_experience=?, " +
-            "    date_of_birth=?, gender=? " +
+            "    date_of_birth=?, gender=?, event_id=? " +
             "WHERE employee_id=?";
-        try (PreparedStatement ps = conn().prepareStatement(updateEmp)) {
+        try (PreparedStatement ps = conn().prepareStatement(sql)) {
             ps.setString(1, emp.getFirstName());
             ps.setString(2, emp.getLastName());
             ps.setString(3, emp.getPhone());
             ps.setInt(4,    emp.getYearsOfExperience());
             ps.setString(5, emp.getDateOfBirth());
             ps.setString(6, emp.getGender());
-            ps.setInt(7,    emp.getEmployeeId());
-            if (ps.executeUpdate() == 0) return false;
+            if (emp.getEventId() > 0) ps.setInt(7, emp.getEventId());
+            else                      ps.setNull(7, java.sql.Types.INTEGER);
+            ps.setInt(8, emp.getEmployeeId());
+            return ps.executeUpdate() > 0;
         }
-
-        // 2. Replace the event assignment (delete old, insert new if present).
-        unlinkAllEvents(emp.getEmployeeId());
-        if (emp.getEventId() > 0) {
-            linkToEvent(emp.getEmployeeId(), emp.getEventId());
-        }
-        return true;
     }
 
-    /** Deletes an employee. The employee_event rows are removed automatically by CASCADE. */
+    /** Deletes an employee by ID. No junction rows to clean up. */
     public boolean deleteEmployee(int employeeId) throws SQLException {
         String sql = "DELETE FROM employees WHERE employee_id=?";
         try (PreparedStatement ps = conn().prepareStatement(sql)) {
@@ -181,10 +157,9 @@ public class EmployeeDAO {
         String sql =
             "SELECT e.employee_id, e.first_name, e.last_name, e.phone, " +
             "       e.years_of_experience, e.date_of_birth, e.gender, " +
-            "       ee.event_id, ev.name AS event_name " +
+            "       e.event_id, ev.name AS event_name " +
             "FROM employees e " +
-            "LEFT JOIN employee_event ee ON e.employee_id = ee.employee_id " +
-            "LEFT JOIN events ev         ON ee.event_id   = ev.event_id " +
+            "LEFT JOIN events ev ON e.event_id = ev.event_id " +
             "WHERE e.employee_id = ?";
         try (PreparedStatement ps = conn().prepareStatement(sql)) {
             ps.setInt(1, employeeId);
@@ -209,29 +184,18 @@ public class EmployeeDAO {
     }
 
     /**
-     * Returns all employees (one row per person) for use in the Event dialog's
-     * staff picker. Each employee carries their current event assignment name
-     * so the picker can show context ("currently assigned to: Tech Summit").
-     * Uses GROUP BY so an employee assigned to multiple events appears only once.
-     */
-    /**
-     * Returns all employees (one row per person) for the Event dialog's staff picker.
-     * Uses a subquery to find each employee's most-recent event assignment, then
-     * JOINs to events to resolve the name — avoids the correlated-subquery+aggregate
-     * pattern that SQLite rejects at runtime.
+     * Returns all employees (one row per person) for the Event dialog's staff picker,
+     * each carrying their current event assignment name so the picker can show context.
+     * No subquery needed — the single event_id column guarantees one row per employee.
      */
     public List<AssignedEmployee> getAllEmployeesForPicker() throws SQLException {
         List<AssignedEmployee> list = new ArrayList<>();
         String sql =
             "SELECT e.employee_id, e.first_name, e.last_name, e.phone, " +
             "       e.years_of_experience, e.date_of_birth, e.gender, " +
-            "       COALESCE(ee2.event_id, 0) AS event_id, ev.name AS event_name " +
+            "       COALESCE(e.event_id, 0) AS event_id, ev.name AS event_name " +
             "FROM employees e " +
-            "LEFT JOIN ( " +
-            "    SELECT employee_id, MAX(event_id) AS event_id " +
-            "    FROM employee_event GROUP BY employee_id " +
-            ") ee2 ON e.employee_id = ee2.employee_id " +
-            "LEFT JOIN events ev ON ev.event_id = ee2.event_id " +
+            "LEFT JOIN events ev ON e.event_id = ev.event_id " +
             "ORDER BY e.last_name, e.first_name";
         try (Statement st = conn().createStatement();
              ResultSet rs = st.executeQuery(sql)) {
@@ -259,7 +223,7 @@ public class EmployeeDAO {
      */
     public List<Integer> getEmployeeIdsForEvent(int eventId) throws SQLException {
         List<Integer> ids = new ArrayList<>();
-        String sql = "SELECT employee_id FROM employee_event WHERE event_id = ?";
+        String sql = "SELECT employee_id FROM employees WHERE event_id = ?";
         try (PreparedStatement ps = conn().prepareStatement(sql)) {
             ps.setInt(1, eventId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -270,31 +234,35 @@ public class EmployeeDAO {
     }
 
     /**
-     * Atomically replaces all employee assignments for an event.
-     * Old links are removed; new ones are inserted — in a single transaction.
-     * Employee records themselves are never touched.
+     * Atomically replaces an event's staff roster.
      *
-     * This is the correct pattern for a staff-assignment system:
-     * the Event picks from an existing staff pool; it does not own the staff.
+     * Step 1 releases everyone currently on this event (event_id → NULL).
+     * Step 2 assigns the selected employees to this event. Because assignment is
+     * a plain UPDATE of event_id, ticking an employee who was on another event
+     * MOVES them here and removes them from the old event automatically — which
+     * matches the "move them here and remove from that event" confirmation the
+     * Staff picker already shows. The whole operation runs in one transaction.
      */
     public void setEventEmployees(int eventId, List<Integer> employeeIds) throws SQLException {
         Connection c = conn();
         c.setAutoCommit(false);
         try {
-            try (PreparedStatement del = c.prepareStatement(
-                    "DELETE FROM employee_event WHERE event_id = ?")) {
-                del.setInt(1, eventId);
-                del.executeUpdate();
+            // 1. Release every employee currently assigned to this event.
+            try (PreparedStatement rel = c.prepareStatement(
+                    "UPDATE employees SET event_id = NULL WHERE event_id = ?")) {
+                rel.setInt(1, eventId);
+                rel.executeUpdate();
             }
+            // 2. Assign the selected employees to this event (moves them if needed).
             if (employeeIds != null && !employeeIds.isEmpty()) {
-                try (PreparedStatement ins = c.prepareStatement(
-                        "INSERT OR IGNORE INTO employee_event (employee_id, event_id) VALUES (?, ?)")) {
+                try (PreparedStatement asg = c.prepareStatement(
+                        "UPDATE employees SET event_id = ? WHERE employee_id = ?")) {
                     for (int empId : employeeIds) {
-                        ins.setInt(1, empId);
-                        ins.setInt(2, eventId);
-                        ins.addBatch();
+                        asg.setInt(1, eventId);
+                        asg.setInt(2, empId);
+                        asg.addBatch();
                     }
-                    ins.executeBatch();
+                    asg.executeBatch();
                 }
             }
             c.commit();
@@ -303,27 +271,6 @@ public class EmployeeDAO {
             throw e;
         } finally {
             c.setAutoCommit(true);
-        }
-    }
-
-    // ── Junction-table helpers ────────────────────────────────────────────
-
-    /** Inserts one row into employee_event. */
-    private void linkToEvent(int employeeId, int eventId) throws SQLException {
-        String sql = "INSERT OR IGNORE INTO employee_event (employee_id, event_id) VALUES (?, ?)";
-        try (PreparedStatement ps = conn().prepareStatement(sql)) {
-            ps.setInt(1, employeeId);
-            ps.setInt(2, eventId);
-            ps.executeUpdate();
-        }
-    }
-
-    /** Removes all event assignments for a given employee. */
-    private void unlinkAllEvents(int employeeId) throws SQLException {
-        String sql = "DELETE FROM employee_event WHERE employee_id = ?";
-        try (PreparedStatement ps = conn().prepareStatement(sql)) {
-            ps.setInt(1, employeeId);
-            ps.executeUpdate();
         }
     }
 }

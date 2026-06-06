@@ -28,7 +28,7 @@ Event                                      ← eventId, name, type, ownerFirstNa
 - `AssignedEmployee` IS-A `Employee` IS-A `Person`
 - `Event` HAS-A `List<Hall>` and `List<AssignedEmployee>`  (composition / association)
 - An `Event` can reference multiple `Hall` objects  (one-to-many from event's view)
-- Up to 3 `AssignedEmployee` objects belong to one `Event` (enforced in application)
+- Employee→Event is one-to-many: up to 3 employees belong to one `Event` (max-3 enforced in the application), and each employee belongs to at most one event (enforced by the schema via a single `event_id` foreign key)
 
 ### Packages
 
@@ -59,19 +59,32 @@ CREATE TABLE events (
     type             TEXT NOT NULL,
     owner_first_name TEXT NOT NULL,
     owner_last_name  TEXT NOT NULL,
-    owner_phone      TEXT NOT NULL
+    owner_phone      TEXT NOT NULL,
+    start_date       TEXT NOT NULL   -- ISO-8601: YYYY-MM-DD
+        CHECK(start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    end_date         TEXT NOT NULL
+        CHECK(end_date   GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    CHECK(end_date >= start_date)
 );
 
--- Many-to-many: one event can use multiple halls
+-- Many-to-many: one event can use multiple halls; one hall hosts many events.
+-- seats_requested is a property of the relationship (this event's seat count in
+-- this hall), so it lives on the junction row — correct 2NF placement.
 CREATE TABLE event_hall (
-    event_id INTEGER NOT NULL,
-    hall_id  INTEGER NOT NULL,
+    event_id        INTEGER NOT NULL,
+    hall_id         INTEGER NOT NULL,
+    seats_requested INTEGER NOT NULL DEFAULT 1 CHECK(seats_requested > 0),
     PRIMARY KEY (event_id, hall_id),
     FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE,
     FOREIGN KEY (hall_id)  REFERENCES halls(hall_id)   ON DELETE CASCADE
 );
 
--- Employees (personal details only; assignments live in employee_event)
+-- Employees. The event assignment is a nullable foreign key directly on the
+-- employee row. This models employee→event as ONE-TO-MANY: one event has many
+-- employees (max 3, enforced by the app); each employee belongs to at most one
+-- event. A single column cannot hold two events, so "one event per employee" is
+-- guaranteed by the schema itself. ON DELETE SET NULL releases staff when their
+-- event is deleted (the employees are kept, their event_id becomes NULL).
 CREATE TABLE employees (
     employee_id         INTEGER PRIMARY KEY AUTOINCREMENT,
     first_name          TEXT    NOT NULL,
@@ -80,16 +93,9 @@ CREATE TABLE employees (
     years_of_experience INTEGER NOT NULL CHECK(years_of_experience >= 0),
     date_of_birth       TEXT    NOT NULL   -- ISO-8601: YYYY-MM-DD
         CHECK(date_of_birth GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
-    gender              TEXT    CHECK(gender IN ('Male','Female'))
-);
-
--- Many-to-many: employees ↔ events (max 3 employees per event, enforced by app)
-CREATE TABLE employee_event (
-    employee_id INTEGER NOT NULL,
-    event_id    INTEGER NOT NULL,
-    PRIMARY KEY (employee_id, event_id),
-    FOREIGN KEY (employee_id) REFERENCES employees(employee_id) ON DELETE CASCADE,
-    FOREIGN KEY (event_id)    REFERENCES events(event_id)       ON DELETE CASCADE
+    gender              TEXT    CHECK(gender IN ('Male','Female')),
+    event_id            INTEGER,
+    FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE SET NULL
 );
 
 -- Admin accounts (manages the system)
@@ -110,7 +116,7 @@ CREATE TABLE admins (
 **Schema design notes:**
 - **1NF** — names stored as `first_name` / `last_name`, never as a combined string
 - **2NF** — every non-key attribute depends on the whole primary key
-- **3NF** — no transitive dependencies; `event_hall` and `employee_event` are proper junction tables
+- **3NF** — no transitive dependencies. `event_hall` is a proper junction table for the many-to-many event↔hall relationship; the one-to-many employee→event relationship is modelled by a nullable `event_id` foreign key on `employees` (a junction table would wrongly permit an employee in two events)
 - **CHECK constraints** enforce domain integrity at the database level
 - **UNIQUE(phone)** on employees and admins prevents duplicate registrations; NULLs are treated as distinct by SQLite
 - **ISO-8601 dates** — enforced by GLOB CHECK; enables correct sorting and SQLite date functions

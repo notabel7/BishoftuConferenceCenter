@@ -10,8 +10,10 @@ import java.sql.*;
  *   - 1NF  : All attribute values are atomic. Names are stored as separate
  *             first_name / last_name columns — never as a combined full_name.
  *   - 2NF  : Every non-key attribute depends on the whole primary key.
- *   - 3NF  : No transitive dependencies; event_hall and employee_event are
- *             proper junction tables — no transitive FK buried in a data table.
+ *   - 3NF  : No transitive dependencies. event_hall is a proper junction table
+ *             for the many-to-many event↔hall relationship. The employee↔event
+ *             relationship is one-to-many, so it is modelled by a nullable
+ *             event_id foreign key on employees — not a junction table.
  *   - CHECK constraints enforce domain integrity at the database level,
  *             so invalid data cannot enter the system even via raw SQL.
  *   - UNIQUE(phone) on employees and admins prevents duplicate registrations
@@ -119,7 +121,15 @@ public class DatabaseConnection {
             // phone is UNIQUE — SQLite treats each NULL as distinct, so employees
             //   without a phone number are still allowed in any quantity.
             // date_of_birth uses a GLOB CHECK to enforce ISO-8601 (YYYY-MM-DD).
-            // event_id removed — assignments live in the employee_event junction table.
+            //
+            // event_id is a NULLABLE foreign key to events. This models the
+            // employee→event relationship as ONE-TO-MANY (one event has many
+            // employees; each employee belongs to at most one event), which is
+            // exactly what the business rules require. A single column physically
+            // cannot hold two events, so "one event per employee" is enforced by
+            // the schema itself — not just by application code.
+            // ON DELETE SET NULL: deleting an event releases its staff (their
+            // event_id becomes NULL) instead of deleting the employees.
             st.execute(
                 "CREATE TABLE IF NOT EXISTS employees (" +
                 "  employee_id         INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -129,22 +139,9 @@ public class DatabaseConnection {
                 "  years_of_experience INTEGER NOT NULL CHECK(years_of_experience >= 0)," +
                 "  date_of_birth       TEXT    NOT NULL" +
                 "    CHECK(date_of_birth GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')," +
-                "  gender              TEXT    CHECK(gender IN ('Male','Female'))" +
-                ")"
-            );
-
-            // ── employee_event (junction table) ───────────────────────
-            // Replaces the single event_id FK on employees.
-            // An employee can now be assigned to multiple events; the max-3
-            // rule is still enforced in EmployeeDAO.countEmployeesForEvent().
-            // Cascade deletes: removing an employee or event cleans up assignments.
-            st.execute(
-                "CREATE TABLE IF NOT EXISTS employee_event (" +
-                "  employee_id INTEGER NOT NULL," +
-                "  event_id    INTEGER NOT NULL," +
-                "  PRIMARY KEY (employee_id, event_id)," +
-                "  FOREIGN KEY (employee_id) REFERENCES employees(employee_id) ON DELETE CASCADE," +
-                "  FOREIGN KEY (event_id)    REFERENCES events(event_id)       ON DELETE CASCADE" +
+                "  gender              TEXT    CHECK(gender IN ('Male','Female'))," +
+                "  event_id            INTEGER," +
+                "  FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE SET NULL" +
                 ")"
             );
 
