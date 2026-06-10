@@ -184,6 +184,10 @@ Five halls are pre-seeded.
 > your own machine. Change the admin password after your first login via
 > **Account → Change Password** in the menu bar.
 
+> **Security note:** Passwords are stored and compared in plaintext for assignment
+> simplicity. A production system would use salted hashing (e.g. BCrypt or PBKDF2)
+> via a library such as Spring Security Crypto or jBCrypt.
+
 ---
 
 ## F. Project Structure

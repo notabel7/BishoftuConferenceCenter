@@ -30,7 +30,7 @@ import java.util.List;
  * DataChangeListener so the Hall "Status" column and Employee "Assigned Event"
  * column refresh automatically without a manual click.
  */
-public class EventPanel extends JPanel {
+public class EventPanel extends BaseCrudPanel {
 
     private final EventDAO    eventDAO    = new EventDAO();
     private final HallDAO     hallDAO     = new HallDAO();
@@ -54,11 +54,12 @@ public class EventPanel extends JPanel {
     }
 
     /** Called by MainFrame's cross-tab wiring to refresh this panel's table. */
+    @Override
     public void refresh() { loadData(); }
 
     public EventPanel() {
+        // Background colour is set by the BaseCrudPanel constructor.
         setLayout(new BorderLayout());
-        setBackground(UIConstants.BACKGROUND);
         buildUI();
         loadData();
     }
@@ -148,19 +149,22 @@ public class EventPanel extends JPanel {
 
     // ── Data ─────────────────────────────────────────────────────────────
 
+    /** Builds one table row for an event (looks up its staff count) — single source of truth. */
+    private void addRowFor(Event ev) throws java.sql.SQLException {
+        List<AssignedEmployee> staff = employeeDAO.getEmployeesByEvent(ev.getEventId());
+        model.addRow(new Object[]{
+            ev.getEventId(), ev.getName(), ev.getType(),
+            ev.getStartDate(), ev.getEndDate(),
+            ev.getOwnerFullName(),          // display-only concatenation, never stored
+            ev.getHallNames(),
+            staff.isEmpty() ? "— None —" : staff.size() + " assigned"
+        });
+    }
+
     private void loadData() {
         model.setRowCount(0);
         try {
-            for (Event ev : eventDAO.getAllEvents()) {
-                List<AssignedEmployee> staff = employeeDAO.getEmployeesByEvent(ev.getEventId());
-                model.addRow(new Object[]{
-                    ev.getEventId(), ev.getName(), ev.getType(),
-                    ev.getStartDate(), ev.getEndDate(),
-                    ev.getOwnerFullName(),          // display-only concatenation, never stored
-                    ev.getHallNames(),
-                    staff.isEmpty() ? "— None —" : staff.size() + " assigned"
-                });
-            }
+            for (Event ev : eventDAO.getAllEvents()) addRowFor(ev);
         } catch (Exception ex) {
             error("Failed to load events: " + ex.getMessage());
         }
@@ -177,16 +181,7 @@ public class EventPanel extends JPanel {
                     || ev.getOwnerFullName().toLowerCase().contains(q)
                     || (ev.getStartDate() != null && ev.getStartDate().contains(q))
                     || (ev.getEndDate()   != null && ev.getEndDate().contains(q));
-                if (match) {
-                    List<AssignedEmployee> staff = employeeDAO.getEmployeesByEvent(ev.getEventId());
-                    model.addRow(new Object[]{
-                        ev.getEventId(), ev.getName(), ev.getType(),
-                        ev.getStartDate(), ev.getEndDate(),
-                        ev.getOwnerFullName(),
-                        ev.getHallNames(),
-                        staff.isEmpty() ? "— None —" : staff.size() + " assigned"
-                    });
-                }
+                if (match) addRowFor(ev);
             }
         } catch (Exception ex) { error(ex.getMessage()); }
     }
@@ -231,8 +226,9 @@ public class EventPanel extends JPanel {
         if (id < 0) { info("Select an event first."); return; }
         try {
             Event ev = eventDAO.getEventById(id);
-            ev.setEmployees(employeeDAO.getEmployeesByEvent(id));
-            if (ev != null) showDetailsDialog(ev);
+            if (ev == null) { info("Event no longer exists."); return; }
+            // getEventById already populates halls + employees internally
+            showDetailsDialog(ev);
         } catch (Exception ex) { error(ex.getMessage()); }
     }
 
@@ -285,7 +281,10 @@ public class EventPanel extends JPanel {
                         JOptionPane.showMessageDialog(dlg, sb.toString(),
                             "Date Overlap Notice", JOptionPane.INFORMATION_MESSAGE);
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                    // Non-fatal: the overlap notice is a courtesy hint, not a gate on saving.
+                    System.err.println("[EventPanel] date-overlap check failed: " + ignored.getMessage());
+                }
             }
         });
 
@@ -383,7 +382,10 @@ public class EventPanel extends JPanel {
         final java.util.Map<Integer, Integer> existingHallSeats = new java.util.HashMap<>();
         try {
             if (isEdit) existingHallSeats.putAll(hallDAO.getHallSeatsForEvent(existing.getEventId()));
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            // Non-fatal: if preloading fails, the seat spinners just start at their default.
+            System.err.println("[EventPanel] could not preload hall seats: " + ignored.getMessage());
+        }
 
         JPanel hallPickerWrapper = new JPanel();
         hallPickerWrapper.setLayout(new BoxLayout(hallPickerWrapper, BoxLayout.Y_AXIS));
@@ -532,8 +534,14 @@ public class EventPanel extends JPanel {
                                         spinner.setValue(spinnerMax);
                                         return;
                                     }
-                                } catch (NumberFormatException ignored) {}
-                                try { spinner.commitEdit(); } catch (Exception ignored) {}
+                                } catch (NumberFormatException ignored) {
+                                    // Field empty or non-numeric — let commitEdit normalise it below.
+                                }
+                                try {
+                                    spinner.commitEdit();
+                                } catch (Exception ignored) {
+                                    // Invalid partial text — keep the spinner's last valid value.
+                                }
                             }
                         });
 
@@ -705,12 +713,14 @@ public class EventPanel extends JPanel {
         JPanel tabEmployees = new JPanel(new BorderLayout(0, 8));
         tabEmployees.setBackground(Color.WHITE);
         tabEmployees.setBorder(new EmptyBorder(12, 16, 12, 16));
-        tabEmployees.add(fLabel("Assign staff from the roster (max 3 per event):"), BorderLayout.NORTH);
+        tabEmployees.add(fLabel("Assign staff from the roster (max " +
+            Event.MAX_STAFF_PER_EVENT + " per event):"), BorderLayout.NORTH);
         JScrollPane empScroll = new JScrollPane(staffPickerPanel);
         empScroll.setBorder(BorderFactory.createLineBorder(UIConstants.BORDER_COLOR));
         tabEmployees.add(empScroll, BorderLayout.CENTER);
         JLabel empHint = new JLabel(
-            "<html><i>Staff are managed in the <b>Employees</b> tab. Tick up to 3 to assign.</i></html>");
+            "<html><i>Staff are managed in the <b>Employees</b> tab. Tick up to " +
+            Event.MAX_STAFF_PER_EVENT + " to assign.</i></html>");
         empHint.setFont(UIConstants.FONT_SMALL);
         empHint.setForeground(new Color(100, 100, 120));
         empHint.setBorder(new EmptyBorder(4, 0, 0, 0));
@@ -821,8 +831,9 @@ public class EventPanel extends JPanel {
             for (JCheckBox cb : empChecks) {
                 if (cb.isSelected()) selectedEmpIds.add((int) cb.getClientProperty("employeeId"));
             }
-            if (selectedEmpIds.size() > 3) {
-                error("Maximum 3 staff members can be assigned per event.");
+            if (selectedEmpIds.size() > Event.MAX_STAFF_PER_EVENT) {
+                error("Maximum " + Event.MAX_STAFF_PER_EVENT +
+                      " staff members can be assigned per event.");
                 tabs.setSelectedIndex(2); return;
             }
 
@@ -965,7 +976,9 @@ public class EventPanel extends JPanel {
                 java.time.LocalDate sd = java.time.LocalDate.parse(ev.getStartDate());
                 java.time.LocalDate ed = java.time.LocalDate.parse(ev.getEndDate());
                 days = java.time.temporal.ChronoUnit.DAYS.between(sd, ed) + 1;
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // Unparseable dates — fall back to the 1-day default already set above.
+            }
 
             double totalCost = 0;
             for (Hall h : ev.getHalls()) {
@@ -1108,30 +1121,7 @@ public class EventPanel extends JPanel {
     // ── Styling helpers ───────────────────────────────────────────────────
 
     private void styleTable() {
-        table.setFont(UIConstants.FONT_TABLE);
-        table.setRowHeight(UIConstants.ROW_HEIGHT);
-        table.setShowGrid(false);
-        table.setIntercellSpacing(new Dimension(0, 0));
-        table.setSelectionBackground(UIConstants.SELECTED_ROW);
-        table.setSelectionForeground(Color.BLACK);
-        table.setFillsViewportHeight(true);
-        table.setBackground(Color.WHITE);
-
-        table.getTableHeader().setReorderingAllowed(false);
-        table.getTableHeader().setDefaultRenderer(new DefaultTableCellRenderer() {
-            @Override
-            public Component getTableCellRendererComponent(
-                    JTable t, Object val, boolean sel, boolean foc, int row, int col) {
-                super.getTableCellRendererComponent(t, val, sel, foc, row, col);
-                setText(val == null ? "" : val.toString());
-                setBackground(UIConstants.PRIMARY);
-                setForeground(Color.WHITE);
-                setFont(UIConstants.FONT_HEADER);
-                setBorder(new EmptyBorder(6, 8, 6, 8));
-                setOpaque(true);
-                return this;
-            }
-        });
+        styleTableBase(table);   // shared setup + header renderer (BaseCrudPanel)
 
         table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
@@ -1165,27 +1155,8 @@ public class EventPanel extends JPanel {
             table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
     }
 
-    private JPanel formHeader(String text) {
-        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 10));
-        p.setBackground(UIConstants.PRIMARY);
-        JLabel l = new JLabel(text);
-        l.setFont(UIConstants.FONT_H2);
-        l.setForeground(Color.WHITE);
-        p.add(l);
-        return p;
-    }
-
-    private JTextField formField(String val) {
-        JTextField f = new JTextField(val);
-        f.setFont(UIConstants.FONT_BODY);
-        f.setBackground(UIConstants.INPUT_BG);
-        f.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(UIConstants.BORDER_COLOR),
-            BorderFactory.createEmptyBorder(4, 8, 4, 8)
-        ));
-        f.setPreferredSize(new Dimension(0, UIConstants.FIELD_H));
-        return f;
-    }
+    // formHeader, formField, actionButton, applyIcon, info, error
+    // are inherited from BaseCrudPanel.
 
     /** Text field that shows grey italic placeholder text when empty and unfocused. */
     private JTextField hintField(String val, String hint) {
@@ -1243,26 +1214,6 @@ public class EventPanel extends JPanel {
         return l;
     }
 
-    private JButton actionButton(String text, Color bg, Color fg) {
-        JButton b = new JButton(text);
-        b.setUI(new javax.swing.plaf.basic.BasicButtonUI());
-        b.setFont(UIConstants.FONT_BUTTON);
-        b.setBackground(bg);
-        b.setForeground(fg);
-        b.setFocusPainted(false);
-        b.setBorderPainted(false);
-        b.setOpaque(true);
-        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        b.setMargin(new Insets(6, 14, 6, 14));
-        b.setIconTextGap(6);
-        return b;
-    }
-
-    private void applyIcon(JButton btn, String iconFile) {
-        javax.swing.ImageIcon ic = UIConstants.loadIcon(iconFile);
-        if (ic != null) btn.setIcon(ic);
-    }
-
     private boolean isValidPhone(String phone) { return phone.matches("\\d+"); }
     private boolean hasDigit(String s)         { return s.chars().anyMatch(Character::isDigit); }
     private boolean isValidDate(String d) {
@@ -1270,6 +1221,4 @@ public class EventPanel extends JPanel {
         try { java.time.LocalDate.parse(d); return true; }
         catch (java.time.format.DateTimeParseException e) { return false; }
     }
-    private void info(String msg)  { JOptionPane.showMessageDialog(this, msg, "Info",  JOptionPane.INFORMATION_MESSAGE); }
-    private void error(String msg) { JOptionPane.showMessageDialog(this, msg, "Error", JOptionPane.ERROR_MESSAGE); }
 }

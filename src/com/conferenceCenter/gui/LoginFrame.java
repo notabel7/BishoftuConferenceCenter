@@ -7,7 +7,6 @@ import com.conferenceCenter.util.UIConstants;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.awt.event.*;
 
 public class LoginFrame extends JFrame {
 
@@ -128,13 +127,9 @@ public class LoginFrame extends JFrame {
 
         // ── Actions ──────────────────────────────────────────────────
         btnLogin.addActionListener(e -> doLogin());
+        // setDefaultButton makes Enter trigger login anywhere in the window,
+        // so no separate KeyListener on the password field is needed.
         getRootPane().setDefaultButton(btnLogin);
-
-        tfPassword.addKeyListener(new KeyAdapter() {
-            @Override public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_ENTER) doLogin();
-            }
-        });
     }
 
     private void doLogin() {

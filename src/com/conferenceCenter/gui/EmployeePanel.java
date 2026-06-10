@@ -21,7 +21,7 @@ import java.util.List;
  * Cross-tab integration: notifies sibling panels after any mutation so the
  * Event dialog's staff picker always reflects the current roster.
  */
-public class EmployeePanel extends JPanel {
+public class EmployeePanel extends BaseCrudPanel {
 
     private final EmployeeDAO employeeDAO = new EmployeeDAO();
     private final EventDAO    eventDAO    = new EventDAO();
@@ -44,11 +44,12 @@ public class EmployeePanel extends JPanel {
     }
 
     /** Called by MainFrame's cross-tab wiring to refresh this panel's table. */
+    @Override
     public void refresh() { loadData(); }
 
     public EmployeePanel() {
+        // Background colour is set by the BaseCrudPanel constructor.
         setLayout(new BorderLayout());
-        setBackground(UIConstants.BACKGROUND);
         buildUI();
         loadData();
     }
@@ -151,21 +152,24 @@ public class EmployeePanel extends JPanel {
 
     // ── Data ─────────────────────────────────────────────────────────────
 
+    /** Builds one table row for an employee — single source of truth for column layout. */
+    private void addRowFor(AssignedEmployee ae) {
+        model.addRow(new Object[]{
+            ae.getEmployeeId(),
+            ae.getFirstName(),
+            ae.getLastName(),
+            ae.getPhone() == null ? "—" : ae.getPhone(),
+            ae.getYearsOfExperience(),
+            ae.getDateOfBirth(),
+            ae.getGender() == null ? "—" : ae.getGender(),
+            ae.getEventName() == null ? "— Unassigned —" : ae.getEventName()
+        });
+    }
+
     private void loadData() {
         model.setRowCount(0);
         try {
-            for (AssignedEmployee ae : employeeDAO.getAllEmployees()) {
-                model.addRow(new Object[]{
-                    ae.getEmployeeId(),
-                    ae.getFirstName(),
-                    ae.getLastName(),
-                    ae.getPhone() == null ? "—" : ae.getPhone(),
-                    ae.getYearsOfExperience(),
-                    ae.getDateOfBirth(),
-                    ae.getGender() == null ? "—" : ae.getGender(),
-                    ae.getEventName() == null ? "— Unassigned —" : ae.getEventName()
-                });
-            }
+            for (AssignedEmployee ae : employeeDAO.getAllEmployees()) addRowFor(ae);
         } catch (Exception ex) {
             error("Failed to load employees: " + ex.getMessage());
         }
@@ -181,18 +185,7 @@ public class EmployeePanel extends JPanel {
                     || ae.getLastName().toLowerCase().contains(q)
                     || ae.getFullName().toLowerCase().contains(q)
                     || (ae.getEventName() != null && ae.getEventName().toLowerCase().contains(q));
-                if (match) {
-                    model.addRow(new Object[]{
-                        ae.getEmployeeId(),
-                        ae.getFirstName(),
-                        ae.getLastName(),
-                        ae.getPhone() == null ? "—" : ae.getPhone(),
-                        ae.getYearsOfExperience(),
-                        ae.getDateOfBirth(),
-                        ae.getGender() == null ? "—" : ae.getGender(),
-                        ae.getEventName() == null ? "— Unassigned —" : ae.getEventName()
-                    });
-                }
+                if (match) addRowFor(ae);
             }
         } catch (Exception ex) { error(ex.getMessage()); }
     }
@@ -348,8 +341,9 @@ public class EmployeePanel extends JPanel {
                 (!isEdit || existing.getEventId() != eventId);
             if (movingToNewEvent) {
                 try {
-                    if (employeeDAO.countEmployeesForEvent(eventId) >= 3) {
-                        error("This event already has 3 employees assigned (maximum)."); return;
+                    if (employeeDAO.countEmployeesForEvent(eventId) >= Event.MAX_STAFF_PER_EVENT) {
+                        error("This event already has " + Event.MAX_STAFF_PER_EVENT +
+                              " employees assigned (maximum)."); return;
                     }
                 } catch (Exception ex) { error(ex.getMessage()); return; }
             }
@@ -384,30 +378,7 @@ public class EmployeePanel extends JPanel {
     // ── Styling helpers ───────────────────────────────────────────────────
 
     private void styleTable() {
-        table.setFont(UIConstants.FONT_TABLE);
-        table.setRowHeight(UIConstants.ROW_HEIGHT);
-        table.setShowGrid(false);
-        table.setIntercellSpacing(new Dimension(0, 0));
-        table.setSelectionBackground(UIConstants.SELECTED_ROW);
-        table.setSelectionForeground(Color.BLACK);
-        table.setFillsViewportHeight(true);
-        table.setBackground(Color.WHITE);
-
-        table.getTableHeader().setReorderingAllowed(false);
-        table.getTableHeader().setDefaultRenderer(new DefaultTableCellRenderer() {
-            @Override
-            public Component getTableCellRendererComponent(
-                    JTable t, Object val, boolean sel, boolean foc, int row, int col) {
-                super.getTableCellRendererComponent(t, val, sel, foc, row, col);
-                setText(val == null ? "" : val.toString());
-                setBackground(UIConstants.PRIMARY);
-                setForeground(Color.WHITE);
-                setFont(UIConstants.FONT_HEADER);
-                setBorder(new EmptyBorder(6, 8, 6, 8));
-                setOpaque(true);
-                return this;
-            }
-        });
+        styleTableBase(table);   // shared setup + header renderer (BaseCrudPanel)
 
         table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
@@ -449,50 +420,9 @@ public class EmployeePanel extends JPanel {
         });
     }
 
-    private JPanel formHeader(String text) {
-        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 10));
-        p.setBackground(UIConstants.PRIMARY);
-        JLabel l = new JLabel(text);
-        l.setFont(UIConstants.FONT_H2);
-        l.setForeground(Color.WHITE);
-        p.add(l);
-        return p;
-    }
-
-    private JTextField formField(String val) {
-        JTextField f = new JTextField(val);
-        f.setFont(UIConstants.FONT_BODY);
-        f.setBackground(UIConstants.INPUT_BG);
-        f.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(UIConstants.BORDER_COLOR),
-            BorderFactory.createEmptyBorder(4, 8, 4, 8)
-        ));
-        f.setPreferredSize(new Dimension(0, UIConstants.FIELD_H));
-        return f;
-    }
-
-    private JButton actionButton(String text, Color bg, Color fg) {
-        JButton b = new JButton(text);
-        b.setUI(new javax.swing.plaf.basic.BasicButtonUI());
-        b.setFont(UIConstants.FONT_BUTTON);
-        b.setBackground(bg);
-        b.setForeground(fg);
-        b.setFocusPainted(false);
-        b.setBorderPainted(false);
-        b.setOpaque(true);
-        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        b.setMargin(new Insets(6, 14, 6, 14));
-        b.setIconTextGap(6);
-        return b;
-    }
-
-    private void applyIcon(JButton btn, String iconFile) {
-        javax.swing.ImageIcon ic = UIConstants.loadIcon(iconFile);
-        if (ic != null) btn.setIcon(ic);
-    }
+    // formHeader, formField, actionButton, applyIcon, info, error
+    // are inherited from BaseCrudPanel.
 
     private boolean isValidPhone(String phone) { return phone.matches("\\d+"); }
     private boolean hasDigit(String s) { return s.chars().anyMatch(Character::isDigit); }
-    private void info(String msg)  { JOptionPane.showMessageDialog(this, msg, "Info",  JOptionPane.INFORMATION_MESSAGE); }
-    private void error(String msg) { JOptionPane.showMessageDialog(this, msg, "Error", JOptionPane.ERROR_MESSAGE); }
 }

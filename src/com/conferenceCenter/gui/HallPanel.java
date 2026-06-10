@@ -21,7 +21,7 @@ import java.util.List;
  * Cross-tab integration: after any add/edit/delete, notifies sibling panels
  * via DataChangeListener so the Event dialog's hall picker stays current.
  */
-public class HallPanel extends JPanel {
+public class HallPanel extends BaseCrudPanel {
 
     private final HallDAO dao = new HallDAO();
 
@@ -42,11 +42,12 @@ public class HallPanel extends JPanel {
     }
 
     /** Called by MainFrame's cross-tab wiring to refresh this panel's table. */
+    @Override
     public void refresh() { loadData(); }
 
     public HallPanel() {
+        // Background colour is set by the BaseCrudPanel constructor.
         setLayout(new BorderLayout(0, 0));
-        setBackground(UIConstants.BACKGROUND);
         buildUI();
         loadData();
     }
@@ -132,20 +133,23 @@ public class HallPanel extends JPanel {
 
     // ── Data ─────────────────────────────────────────────────────────────
 
+    /** Builds one table row for a hall — single source of truth for column layout. */
+    private void addRowFor(Hall h) {
+        model.addRow(new Object[]{
+            h.getHallId(), h.getName(),
+            String.format("%.2f", h.getPricePerDay()),
+            h.getCapacity(),
+            h.getBookingCount() == 0
+                ? "Available"
+                : "In Use (" + h.getBookingCount() + " event" +
+                  (h.getBookingCount() == 1 ? "" : "s") + ")"
+        });
+    }
+
     private void loadData() {
         model.setRowCount(0);
         try {
-            for (Hall h : dao.getAllHalls()) {
-                model.addRow(new Object[]{
-                    h.getHallId(), h.getName(),
-                    String.format("%.2f", h.getPricePerDay()),
-                    h.getCapacity(),
-                    h.getBookingCount() == 0
-                        ? "Available"
-                        : "In Use (" + h.getBookingCount() + " event" +
-                          (h.getBookingCount() == 1 ? "" : "s") + ")"
-                });
-            }
+            for (Hall h : dao.getAllHalls()) addRowFor(h);
         } catch (Exception ex) {
             error("Failed to load halls: " + ex.getMessage());
         }
@@ -156,17 +160,7 @@ public class HallPanel extends JPanel {
         model.setRowCount(0);
         try {
             for (Hall h : dao.getAllHalls()) {
-                if (h.getName().toLowerCase().contains(q) || q.isEmpty()) {
-                    model.addRow(new Object[]{
-                        h.getHallId(), h.getName(),
-                        String.format("%.2f", h.getPricePerDay()),
-                        h.getCapacity(),
-                        h.getBookingCount() == 0
-                            ? "Available"
-                            : "In Use (" + h.getBookingCount() + " event" +
-                              (h.getBookingCount() == 1 ? "" : "s") + ")"
-                    });
-                }
+                if (h.getName().toLowerCase().contains(q) || q.isEmpty()) addRowFor(h);
             }
         } catch (Exception ex) {
             error("Filter error: " + ex.getMessage());
@@ -311,30 +305,7 @@ public class HallPanel extends JPanel {
     private static final Color STATUS_IN_USE    = new Color(230, 81, 0);
 
     private void styleTable() {
-        table.setFont(UIConstants.FONT_TABLE);
-        table.setRowHeight(UIConstants.ROW_HEIGHT);
-        table.setShowGrid(false);
-        table.setIntercellSpacing(new Dimension(0, 0));
-        table.setSelectionBackground(UIConstants.SELECTED_ROW);
-        table.setSelectionForeground(Color.BLACK);
-        table.setFillsViewportHeight(true);
-        table.setBackground(Color.WHITE);
-
-        table.getTableHeader().setReorderingAllowed(false);
-        table.getTableHeader().setDefaultRenderer(new DefaultTableCellRenderer() {
-            @Override
-            public Component getTableCellRendererComponent(
-                    JTable t, Object val, boolean sel, boolean foc, int row, int col) {
-                super.getTableCellRendererComponent(t, val, sel, foc, row, col);
-                setText(val == null ? "" : val.toString());
-                setBackground(UIConstants.PRIMARY);
-                setForeground(Color.WHITE);
-                setFont(UIConstants.FONT_HEADER);
-                setBorder(new EmptyBorder(6, 8, 6, 8));
-                setOpaque(true);
-                return this;
-            }
-        });
+        styleTableBase(table);   // shared setup + header renderer (BaseCrudPanel)
 
         // Default renderer for all columns except Status
         table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
@@ -376,47 +347,8 @@ public class HallPanel extends JPanel {
             table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
     }
 
-    private JPanel formHeader(String text) {
-        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 10));
-        p.setBackground(UIConstants.PRIMARY);
-        JLabel l = new JLabel(text);
-        l.setFont(UIConstants.FONT_H2);
-        l.setForeground(Color.WHITE);
-        p.add(l);
-        return p;
-    }
-
-    private JTextField formField(String val) {
-        JTextField f = new JTextField(val);
-        f.setFont(UIConstants.FONT_BODY);
-        f.setBackground(UIConstants.INPUT_BG);
-        f.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(UIConstants.BORDER_COLOR),
-            BorderFactory.createEmptyBorder(4, 8, 4, 8)
-        ));
-        f.setPreferredSize(new Dimension(0, UIConstants.FIELD_H));
-        return f;
-    }
-
-    private JButton actionButton(String text, Color bg, Color fg) {
-        JButton b = new JButton(text);
-        b.setUI(new javax.swing.plaf.basic.BasicButtonUI());
-        b.setFont(UIConstants.FONT_BUTTON);
-        b.setBackground(bg);
-        b.setForeground(fg);
-        b.setFocusPainted(false);
-        b.setBorderPainted(false);
-        b.setOpaque(true);
-        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        b.setMargin(new Insets(6, 14, 6, 14));
-        b.setIconTextGap(6);
-        return b;
-    }
-
-    private void applyIcon(JButton btn, String iconFile) {
-        javax.swing.ImageIcon ic = UIConstants.loadIcon(iconFile);
-        if (ic != null) btn.setIcon(ic);
-    }
+    // formHeader, formField, actionButton, applyIcon, info, error
+    // are inherited from BaseCrudPanel.
 
     private JButton iconButton() {
         JButton b = new JButton();
@@ -429,7 +361,4 @@ public class HallPanel extends JPanel {
     private boolean hasDigit(String s) {
         return s.chars().anyMatch(Character::isDigit);
     }
-
-    private void info(String msg)  { JOptionPane.showMessageDialog(this, msg, "Info",  JOptionPane.INFORMATION_MESSAGE); }
-    private void error(String msg) { JOptionPane.showMessageDialog(this, msg, "Error", JOptionPane.ERROR_MESSAGE); }
 }

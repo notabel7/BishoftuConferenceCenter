@@ -177,30 +177,30 @@ public class DatabaseConnection {
             catch (SQLException ignored) {}
 
             // ── Seed: default admin account ───────────────────────────
-            ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM admins");
-            if (rs.next() && rs.getInt(1) == 0) {
-                st.execute(
-                    "INSERT INTO admins " +
-                    "  (first_name, last_name, phone, years_of_experience, date_of_birth, gender, username, password) " +
-                    "VALUES " +
-                    "  ('System','Administrator','0900000000',5,'1990-01-01','Male','admin','admin123')"
-                );
+            try (ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM admins")) {
+                if (rs.next() && rs.getInt(1) == 0) {
+                    st.execute(
+                        "INSERT INTO admins " +
+                        "  (first_name, last_name, phone, years_of_experience, date_of_birth, gender, username, password) " +
+                        "VALUES " +
+                        "  ('System','Administrator','0900000000',5,'1990-01-01','Male','admin','admin123')"
+                    );
+                }
             }
-            rs.close();
 
             // ── Seed: five halls ──────────────────────────────────────
-            rs = st.executeQuery("SELECT COUNT(*) FROM halls");
-            if (rs.next() && rs.getInt(1) == 0) {
-                String[] inserts = {
-                    "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Abay Hall',   5000.00, 500)",
-                    "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Baro Hall',   3000.00, 300)",
-                    "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Awash Hall',  2000.00, 200)",
-                    "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Omo Hall',    1500.00, 150)",
-                    "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Hawassa Hall',1000.00, 100)"
-                };
-                for (String sql : inserts) st.execute(sql);
+            try (ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM halls")) {
+                if (rs.next() && rs.getInt(1) == 0) {
+                    String[] inserts = {
+                        "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Abay Hall',   5000.00, 500)",
+                        "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Baro Hall',   3000.00, 300)",
+                        "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Awash Hall',  2000.00, 200)",
+                        "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Omo Hall',    1500.00, 150)",
+                        "INSERT INTO halls (name,price_per_day,capacity) VALUES ('Hawassa Hall',1000.00, 100)"
+                    };
+                    for (String sql : inserts) st.execute(sql);
+                }
             }
-            rs.close();
         }
     }
 }

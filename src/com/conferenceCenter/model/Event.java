@@ -10,6 +10,9 @@ import java.util.List;
  */
 public class Event {
 
+    /** Maximum number of staff that may be assigned to a single event. */
+    public static final int MAX_STAFF_PER_EVENT = 3;
+
     private int    eventId;
     private String name;
     private String type;

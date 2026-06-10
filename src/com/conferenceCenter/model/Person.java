@@ -6,9 +6,9 @@ package com.conferenceCenter.model;
  */
 public abstract class Person {
 
-    protected String firstName;
-    protected String lastName;
-    protected String phone;
+    private String firstName;
+    private String lastName;
+    private String phone;
 
     public Person() {}
 

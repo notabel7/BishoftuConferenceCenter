@@ -65,6 +65,7 @@ javac -g -encoding UTF-8 ^
       src\com\conferenceCenter\dao\EmployeeDAO.java ^
       src\com\conferenceCenter\dao\EventDAO.java ^
       src\com\conferenceCenter\gui\DataChangeListener.java ^
+      src\com\conferenceCenter\gui\BaseCrudPanel.java ^
       src\com\conferenceCenter\gui\LoginFrame.java ^
       src\com\conferenceCenter\gui\HallPanel.java ^
       src\com\conferenceCenter\gui\EmployeePanel.java ^

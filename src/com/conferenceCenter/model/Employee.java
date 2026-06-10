@@ -8,10 +8,10 @@ package com.conferenceCenter.model;
  */
 public abstract class Employee extends Person {
 
-    protected int    employeeId;
-    protected int    yearsOfExperience;
-    protected String dateOfBirth;   // ISO-8601: YYYY-MM-DD
-    protected String gender;        // 'Male' | 'Female'
+    private int    employeeId;
+    private int    yearsOfExperience;
+    private String dateOfBirth;   // ISO-8601: YYYY-MM-DD
+    private String gender;        // 'Male' | 'Female'
 
     public Employee() {}
 
