@@ -1,4 +1,4 @@
-# Bishoftu Conference Center — Management System
+# Bishoftu Conference Center Management System
 
 Java Swing + SQLite desktop application for managing halls, events, and employees
 at a conference center in Bishoftu town.
