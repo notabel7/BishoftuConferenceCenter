@@ -316,7 +316,7 @@ public class EmployeePanel extends BaseCrudPanel {
                 error("Name fields cannot contain numbers."); return;
             }
             if (!phone.isEmpty() && !isValidPhone(phone)) {
-                error("Phone number must contain only digits."); return;
+                error("Phone number must be exactly 10 digits  (e.g. 0912345678)."); return;
             }
             int yoe;
             try { yoe = Integer.parseInt(yoeStr); }
@@ -423,6 +423,6 @@ public class EmployeePanel extends BaseCrudPanel {
     // formHeader, formField, actionButton, applyIcon, info, error
     // are inherited from BaseCrudPanel.
 
-    private boolean isValidPhone(String phone) { return phone.matches("\\d+"); }
+    private boolean isValidPhone(String phone) { return phone.matches("\\d{10}"); }
     private boolean hasDigit(String s) { return s.chars().anyMatch(Character::isDigit); }
 }

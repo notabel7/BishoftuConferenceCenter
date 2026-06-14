@@ -429,14 +429,15 @@ public class EventPanel extends BaseCrudPanel {
                     hallPickerWrapper.add(none);
                 } else {
                     for (Hall h : allHalls) {
-                        // ── Availability calculation ───────────────────
-                        int seatsUsed = 0;
+                        // ── Availability (EXCLUSIVE booking) ───────────
+                        // A hall hosts at most ONE event per overlapping date range.
+                        // If any other event already booked it on these dates, it's taken.
+                        int otherBookings = 0;
                         if (hasDates) {
-                            seatsUsed = hallDAO.getSeatsBookedForHall(
+                            otherBookings = hallDAO.countHallBookingsOnDates(
                                 h.getHallId(), sd, ed, excludeId);
                         }
-                        int seatsLeft = h.getCapacity() - seatsUsed;
-                        boolean isFull = hasDates && seatsLeft <= 0;
+                        boolean isFull = hasDates && otherBookings > 0;
 
                         // ── Availability status text — clean, no bracket tags ──
                         String statusText;
@@ -445,13 +446,10 @@ public class EventPanel extends BaseCrudPanel {
                             statusText  = "Enter dates in Basic Info first";
                             statusColor = new Color(150, 150, 150);
                         } else if (isFull) {
-                            statusText  = "ALREADY TAKEN  (all " + h.getCapacity() + " seats booked)";
+                            statusText  = "ALREADY BOOKED for these dates";
                             statusColor = UIConstants.DANGER;
-                        } else if (seatsUsed > 0) {
-                            statusText  = seatsLeft + " of " + h.getCapacity() + " seats free";
-                            statusColor = new Color(230, 81, 0);
                         } else {
-                            statusText  = "All " + h.getCapacity() + " seats available";
+                            statusText  = "Available  (full hall, up to " + h.getCapacity() + " seats)";
                             statusColor = new Color(27, 94, 32);
                         }
 
@@ -491,20 +489,16 @@ public class EventPanel extends BaseCrudPanel {
                         statusLbl.setForeground(statusColor);
 
                         // Seats label — shown only when checkbox is ticked
-                        String seatsLblText = hasDates
-                            ? "   Seats (max " + seatsLeft + "):"
-                            : "   Seats:";
-                        JLabel seatsLbl = new JLabel(seatsLblText);
+                        JLabel seatsLbl = new JLabel("   Seats (max " + h.getCapacity() + "):");
                         seatsLbl.setFont(UIConstants.FONT_SMALL);
                         seatsLbl.setForeground(UIConstants.PRIMARY);
                         seatsLbl.setVisible(false);
 
-                        // Spinner max = seatsLeft (remaining available seats), NOT full capacity.
-                        // This means arrow-clicking is also hard-capped at what's actually free.
-                        // Final copies needed for capture inside the FocusAdapter lambda.
-                        final int seatsUsedFinal = seatsUsed;
-                        int spinnerMax = Math.max(1, seatsLeft); // always at least 1 to avoid model error
-                        int initVal = 1;
+                        // Exclusive booking → the event reserves the WHOLE hall, so the seat
+                        // count is expected attendance. It defaults to the hall's full capacity
+                        // and is capped there (you can lower it if fewer guests are expected).
+                        int spinnerMax = h.getCapacity();
+                        int initVal    = h.getCapacity();   // default to the whole hall
                         if (existingHallSeats.containsKey(h.getHallId()))
                             initVal = Math.min(existingHallSeats.get(h.getHallId()), spinnerMax);
                         JSpinner spinner = new JSpinner(
@@ -524,12 +518,9 @@ public class EventPanel extends BaseCrudPanel {
                                     int typedVal = Integer.parseInt(spinnerTf.getText().trim());
                                     if (typedVal > spinnerMax) {
                                         JOptionPane.showMessageDialog(dlg,
-                                            "Not enough seats available in \"" + h.getName() + "\".\n\n" +
-                                            "  Total capacity : " + h.getCapacity() + " seats\n" +
-                                            "  Already booked : " + seatsUsedFinal + " seats\n" +
-                                            "  Remaining      : " + seatsLeft + " seats\n\n" +
-                                            "You entered " + typedVal + ". Maximum you can book is " + spinnerMax + ".",
-                                            "Not Enough Seats Available",
+                                            "\"" + h.getName() + "\" holds at most " + spinnerMax + " seats.\n" +
+                                            "You entered " + typedVal + ". The value has been set to " + spinnerMax + ".",
+                                            "Exceeds Hall Capacity",
                                             JOptionPane.WARNING_MESSAGE);
                                         spinner.setValue(spinnerMax);
                                         return;
@@ -776,7 +767,7 @@ public class EventPanel extends BaseCrudPanel {
                 tabs.setSelectedIndex(0); return;
             }
             if (!isValidPhone(ownerPhone)) {
-                error("Owner phone must contain only digits.");
+                error("Owner phone must be exactly 10 digits  (e.g. 0912345678).");
                 tabs.setSelectedIndex(0); return;
             }
             if (!isValidDate(startDate) || !isValidDate(endDate)) {
@@ -802,27 +793,29 @@ public class EventPanel extends BaseCrudPanel {
                 tabs.setSelectedIndex(1); return;
             }
 
-            // Hard seat-availability check at save time — catches any case where
-            // the spinner warning was bypassed (e.g. picker built before dates were entered).
+            // Hard exclusive-booking check at save time — a hall hosts only ONE event
+            // per overlapping date range. Catches any case where the picker was bypassed
+            // (e.g. built before dates were entered). Also guards seats against capacity.
             int excludeIdFinal = isEdit ? existing.getEventId() : 0;
             for (java.util.Map.Entry<Integer,Integer> entry : selectedHallSeats.entrySet()) {
                 try {
-                    int    hid       = entry.getKey();
-                    int    requested = entry.getValue();
-                    int    booked    = hallDAO.getSeatsBookedForHall(hid, startDate, endDate, excludeIdFinal);
-                    Hall   hall      = hallDAO.getHallById(hid);
-                    int    available = hall.getCapacity() - booked;
-                    if (requested > available) {
-                        error("Not enough seats in \"" + hall.getName() + "\".\n\n" +
-                              "  Total capacity : " + hall.getCapacity() + " seats\n" +
-                              "  Already booked : " + booked + " seats\n" +
-                              "  Remaining      : " + available + " seats\n\n" +
-                              "You requested " + requested + ". Please reduce the seat count.");
+                    int  hid       = entry.getKey();
+                    int  requested = entry.getValue();
+                    Hall hall      = hallDAO.getHallById(hid);
+                    if (hallDAO.countHallBookingsOnDates(hid, startDate, endDate, excludeIdFinal) > 0) {
+                        error("\"" + hall.getName() + "\" is already booked by another event " +
+                              "on these dates.\nPick a different hall, or change the event dates.");
+                        tabs.setSelectedIndex(1);
+                        return;
+                    }
+                    if (requested > hall.getCapacity()) {
+                        error("\"" + hall.getName() + "\" holds at most " + hall.getCapacity() +
+                              " seats.\nYou requested " + requested + ". Please reduce the seat count.");
                         tabs.setSelectedIndex(1);
                         return;
                     }
                 } catch (java.sql.SQLException ex) {
-                    error("Seat validation failed: " + ex.getMessage()); return;
+                    error("Hall availability check failed: " + ex.getMessage()); return;
                 }
             }
 
@@ -1214,7 +1207,7 @@ public class EventPanel extends BaseCrudPanel {
         return l;
     }
 
-    private boolean isValidPhone(String phone) { return phone.matches("\\d+"); }
+    private boolean isValidPhone(String phone) { return phone.matches("\\d{10}"); }
     private boolean hasDigit(String s)         { return s.chars().anyMatch(Character::isDigit); }
     private boolean isValidDate(String d) {
         if (d == null || d.length() != 10) return false;

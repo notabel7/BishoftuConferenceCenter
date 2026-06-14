@@ -102,18 +102,17 @@ public class HallDAO {
     }
 
     /**
-     * Returns total seats already reserved for a hall across all events whose
-     * dates overlap with [startDate, endDate], optionally excluding one event
-     * (pass 0 to exclude nothing; pass the current eventId when editing so we
-     * don't count the event's own existing booking against itself).
+     * Exclusive-booking check: counts how many OTHER events have reserved this hall
+     * on dates that overlap [startDate, endDate]. Pass 0 to exclude nothing, or the
+     * current eventId when editing so the event is not counted against itself.
      *
-     * Overlap condition (standard interval algebra):
-     *   existing.start_date <= newEnd  AND  existing.end_date >= newStart
+     * A result greater than 0 means the hall is already taken for those dates —
+     * a conference hall hosts at most one event per overlapping date range.
      */
-    public int getSeatsBookedForHall(int hallId, String startDate, String endDate,
-                                     int excludeEventId) throws SQLException {
+    public int countHallBookingsOnDates(int hallId, String startDate, String endDate,
+                                        int excludeEventId) throws SQLException {
         String sql =
-            "SELECT COALESCE(SUM(eh.seats_requested), 0) AS seats_used " +
+            "SELECT COUNT(*) " +
             "FROM event_hall eh " +
             "JOIN events ev ON ev.event_id = eh.event_id " +
             "WHERE eh.hall_id = ? " +
